@@ -2,10 +2,11 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 
 const config = loadConfig();
-const app = await buildApp({ logger: true });
+const app = await buildApp();
 
 try {
   await app.listen({ port: config.port, host: config.host });
+  app.log.info({ store: app.store.kind }, 'siam-tides server พร้อมใช้งาน');
 } catch (err) {
   app.log.error(err);
   process.exit(1);

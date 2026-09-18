@@ -11,8 +11,16 @@ import {
 } from '@siam/engine';
 import type { Action, Army, BattleReport, FactionId, GameEvent, GameState, ReachTile } from '@siam/engine';
 import { loadSave, saveGame, clearSave } from './persist';
+import { ApiError, createGame as createServerGame, fetchGame, sendAction } from './api/client';
+import { clearSession, loadSession, saveSession } from './api/session';
+import type { OnlineSession } from './api/session';
+import { connectGameSocket } from './api/socket';
+import type { Connection, GameSocket } from './api/socket';
 
 export type Tab = 'info' | 'diplo' | 'bamboo' | 'goals' | 'log';
+
+/** local = engine ในเครื่องตัดสิน, server = server ตัดสินและ client ทำ optimistic update */
+export type Mode = 'local' | 'server';
 
 export type Modal =
   | { kind: 'intro' }
@@ -22,6 +30,25 @@ export type Modal =
   | { kind: 'confirm'; title: string; body: string; confirmLabel: string; danger?: boolean; action: Action };
 
 export const ME: FactionId = 'p1';
+const MY_NAME = 'อาณาจักรนที';
+
+/** คำสั่งที่ผลลัพธ์ขึ้นกับการสุ่ม — client ทายเองไม่ได้ จึงรอคำตอบจาก server */
+const RNG_ACTIONS: ReadonlySet<Action['type']> = new Set(['attack', 'offerPeace', 'endTurn']);
+
+const mineOnly = (events: GameEvent[]) => events.filter((e) => e.to === null || e.to.includes(ME));
+
+function modalsFrom(events: GameEvent[], state: GameState): Modal[] {
+  const modals: Modal[] = [];
+  const myBattle = events.find((e) => e.kind === 'battle' && e.battle?.attacker === ME);
+  if (myBattle?.battle) modals.push({ kind: 'battle', report: myBattle.battle });
+  if (events.some((e) => e.kind === 'season')) {
+    modals.push({ kind: 'season', events: events.filter((e) => e.kind !== 'season'), turn: state.turn });
+  }
+  if (state.ended) modals.push({ kind: 'ending' });
+  return modals;
+}
+
+const newIdempotencyKey = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 
 export interface Store {
   state: GameState;
@@ -30,6 +57,15 @@ export interface Store {
   modals: Modal[];
   toast: string | null;
   loaded: boolean;
+
+  mode: Mode;
+  session: OnlineSession | null;
+  /** version ของ state ตามที่ server บอก (โหมด local ไม่ใช้) */
+  version: number;
+  connection: Connection;
+  /** จำนวนคำสั่งที่ยังรอคำตอบจาก server */
+  inFlight: number;
+  socket: GameSocket | null;
 
   dispatch: (action: Action) => boolean;
   clickTile: (c: number, r: number) => void;
@@ -41,9 +77,15 @@ export interface Store {
   showToast: (text: string) => void;
   newGame: (seed?: number) => void;
   hydrate: () => Promise<void>;
+
+  goOnline: (seed?: number) => Promise<void>;
+  goOffline: () => void;
+  refresh: () => Promise<void>;
+  applyServer: (version: number, view: GameState, events: GameEvent[]) => void;
+  openSocket: () => void;
 }
 
-const fresh = (seed?: number) => createGame({ seed, humans: [{ id: ME, name: 'อาณาจักรนที' }] });
+const fresh = (seed?: number) => createGame({ seed, humans: [{ id: ME, name: MY_NAME }] });
 
 export const useStore = create<Store>((set, get) => ({
   state: fresh(),
@@ -53,28 +95,15 @@ export const useStore = create<Store>((set, get) => ({
   toast: null,
   loaded: false,
 
+  mode: 'local',
+  session: null,
+  version: 0,
+  connection: 'offline',
+  inFlight: 0,
+  socket: null,
+
   dispatch(action) {
-    const { state } = get();
-    const res = applyAction(state, ME, action);
-    if (!res.ok) {
-      get().showToast(res.message || ERROR_MESSAGES[res.error]);
-      return false;
-    }
-    const mine = res.events.filter((e) => e.to === null || e.to.includes(ME));
-    const modals: Modal[] = [];
-    const myBattle = mine.find((e) => e.kind === 'battle' && e.battle?.attacker === ME);
-    if (myBattle?.battle) modals.push({ kind: 'battle', report: myBattle.battle });
-    if (mine.some((e) => e.kind === 'season')) {
-      modals.push({ kind: 'season', events: mine.filter((e) => e.kind !== 'season'), turn: res.state.turn });
-    }
-    if (res.state.ended) modals.push({ kind: 'ending' });
-    set({
-      state: res.state,
-      modals: [...get().modals, ...modals],
-      sel: action.type === 'move' ? { c: action.c, r: action.r } : get().sel,
-    });
-    void saveGame(res.state);
-    return true;
+    return get().mode === 'server' ? dispatchOnline(set, get, action) : dispatchLocal(set, get, action);
   },
 
   clickTile(c, r) {
@@ -121,18 +150,200 @@ export const useStore = create<Store>((set, get) => ({
       if (get().toast === text) set({ toast: null });
     }, 2800);
   },
+
   newGame(seed) {
+    if (get().mode === 'server') {
+      void get().goOnline(seed);
+      return;
+    }
     void clearSave();
     const state = fresh(seed);
     set({ state, sel: null, tab: 'info', modals: [{ kind: 'intro' }], toast: null });
     void saveGame(state);
   },
+
   async hydrate() {
+    const session = loadSession();
+    if (session) {
+      try {
+        const snapshot = await fetchGame(session.gameId, session.token);
+        set({
+          mode: 'server',
+          session,
+          state: snapshot.view,
+          version: snapshot.version,
+          sel: null,
+          modals: [],
+          loaded: true,
+        });
+        get().openSocket();
+        return;
+      } catch {
+        clearSession();
+      }
+    }
     const saved = await loadSave();
     if (saved) set({ state: saved, modals: [], loaded: true });
     else set({ loaded: true });
   },
+
+  async goOnline(seed) {
+    get().socket?.close();
+    set({ connection: 'connecting', socket: null });
+    try {
+      const created = await createServerGame({ seed, players: [{ name: MY_NAME }] });
+      const me = created.players[0];
+      if (!me) throw new ApiError(500, 'INTERNAL', 'server ไม่ได้ส่งที่นั่งผู้เล่นกลับมา');
+      const session: OnlineSession = { gameId: created.gameId, factionId: me.factionId, token: me.token };
+      saveSession(session);
+      void clearSave();
+      set({
+        mode: 'server',
+        session,
+        state: created.view,
+        version: created.version,
+        sel: null,
+        tab: 'info',
+        modals: [{ kind: 'intro' }],
+        toast: null,
+        loaded: true,
+        inFlight: 0,
+      });
+      get().openSocket();
+    } catch (err) {
+      set({ connection: 'offline' });
+      get().showToast(
+        err instanceof ApiError ? err.message : 'เชื่อมต่อ server ไม่ได้ เล่นในเครื่องต่อได้เลย',
+      );
+    }
+  },
+
+  goOffline() {
+    get().socket?.close();
+    clearSession();
+    set({ mode: 'local', session: null, socket: null, connection: 'offline', inFlight: 0, version: 0 });
+    void (async () => {
+      const saved = await loadSave();
+      const state = saved ?? fresh();
+      set({ state, sel: null, tab: 'info', modals: saved ? [] : [{ kind: 'intro' }] });
+      if (!saved) void saveGame(state);
+    })();
+  },
+
+  async refresh() {
+    const { session } = get();
+    if (!session) return;
+    const snapshot = await fetchGame(session.gameId, session.token);
+    set({ state: snapshot.view, version: snapshot.version });
+  },
+
+  applyServer(version, view, events) {
+    if (version <= get().version) return;
+    set({ state: view, version, modals: [...get().modals, ...modalsFrom(events, view)] });
+  },
+
+  openSocket() {
+    const { session } = get();
+    get().socket?.close();
+    if (!session) {
+      set({ socket: null, connection: 'offline' });
+      return;
+    }
+    const socket = connectGameSocket(session.gameId, session.token, {
+      onStatus: (connection) => set({ connection }),
+      onFrame: (frame) => {
+        if (frame.type === 'sync') {
+          if (frame.version >= get().version) set({ state: frame.view, version: frame.version });
+        } else if (frame.type === 'update') {
+          get().applyServer(frame.version, frame.view, frame.events);
+        } else if (frame.type === 'error') {
+          get().showToast(frame.message);
+        }
+      },
+    });
+    set({ socket });
+  },
 }));
+
+type Set = (partial: Partial<Store>) => void;
+type Get = () => Store;
+
+/** โหมดในเครื่อง: engine ตัดสินทันที (พฤติกรรมเดียวกับเฟส 2) */
+function dispatchLocal(set: Set, get: Get, action: Action): boolean {
+  const { state } = get();
+  const res = applyAction(state, ME, action);
+  if (!res.ok) {
+    get().showToast(res.message || ERROR_MESSAGES[res.error]);
+    return false;
+  }
+  const mine = mineOnly(res.events);
+  set({
+    state: res.state,
+    modals: [...get().modals, ...modalsFrom(mine, res.state)],
+    sel: action.type === 'move' ? { c: action.c, r: action.r } : get().sel,
+  });
+  void saveGame(res.state);
+  return true;
+}
+
+/**
+ * โหมด server: ตรวจคำสั่งด้วย engine ในเครื่องก่อนเพื่อได้ feedback ทันที
+ * คำสั่งที่ไม่มีการสุ่มจะอัปเดตหน้าจอทันที (optimistic) แล้วค่อย reconcile ตาม version ที่ server ตอบ
+ */
+function dispatchOnline(set: Set, get: Get, action: Action): boolean {
+  const { state, session, version } = get();
+  if (!session) {
+    get().showToast('ยังไม่ได้เชื่อมต่อ server');
+    return false;
+  }
+  const local = applyAction(state, ME, action);
+  if (!local.ok) {
+    get().showToast(local.message || ERROR_MESSAGES[local.error]);
+    return false;
+  }
+
+  const optimistic = !RNG_ACTIONS.has(action.type);
+  const previous = state;
+  if (optimistic) {
+    set({
+      state: local.state,
+      sel: action.type === 'move' ? { c: action.c, r: action.r } : get().sel,
+    });
+  }
+  set({ inFlight: get().inFlight + 1 });
+
+  void (async () => {
+    try {
+      const outcome = await sendAction({
+        gameId: session.gameId,
+        token: session.token,
+        action,
+        expectedVersion: version,
+        idempotencyKey: newIdempotencyKey(),
+      });
+      get().applyServer(outcome.version, outcome.view, outcome.events);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const details = err.details as { version?: number; view?: GameState } | undefined;
+        if (typeof details?.version === 'number' && details.view) {
+          set({ state: details.view, version: details.version });
+        } else {
+          await get()
+            .refresh()
+            .catch(() => undefined);
+        }
+        get().showToast('สถานะเกมเปลี่ยนไปแล้ว ดึงสถานะล่าสุดมาให้แล้ว ลองสั่งอีกครั้ง');
+      } else {
+        if (optimistic) set({ state: previous });
+        get().showToast(err instanceof ApiError ? err.message : 'ส่งคำสั่งไป server ไม่สำเร็จ');
+      }
+    } finally {
+      set({ inFlight: Math.max(0, get().inFlight - 1) });
+    }
+  })();
+
+  return true;
+}
 
 export function selectedOwnArmy(store: Pick<Store, 'state' | 'sel'>): Army | null {
   if (!store.sel) return null;

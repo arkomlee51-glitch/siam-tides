@@ -7,10 +7,22 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
   const state = useStore((s) => s.state);
   const newGame = useStore((s) => s.newGame);
   const pushModal = useStore((s) => s.pushModal);
+  const online = useStore((s) => s.mode === 'server');
+  const connection = useStore((s) => s.connection);
+  const inFlight = useStore((s) => s.inFlight);
+  const goOnline = useStore((s) => s.goOnline);
+  const goOffline = useStore((s) => s.goOffline);
   const me = state.factions[ME]!;
   const season = seasonOf(state.turn);
   const income = computeIncome(state, me);
   const themeLabel = mode === 'auto' ? 'ธีมอัตโนมัติ' : mode === 'dark' ? 'ธีมมืด' : 'ธีมสว่าง';
+  const serverLabel = !online
+    ? 'เล่นผ่าน server'
+    : connection === 'online'
+      ? 'ออนไลน์'
+      : connection === 'connecting'
+        ? 'กำลังเชื่อมต่อ'
+        : 'สายหลุด กำลังต่อใหม่';
 
   return (
     <header className="top">
@@ -22,6 +34,16 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
         <div className="tbtns">
           <button className="btn icon" onClick={onCycleTheme}>
             {themeLabel}
+          </button>
+          <button
+            className="btn icon"
+            onClick={() => (online ? goOffline() : void goOnline())}
+            title={
+              online ? 'กลับไปเล่นในเครื่อง (เกมบน server ยังอยู่)' : 'ให้ server เป็นผู้ตัดสินคำสั่ง (เฟส 3)'
+            }
+          >
+            {serverLabel}
+            {inFlight > 0 ? ' …' : ''}
           </button>
           <button className="btn icon" onClick={() => pushModal({ kind: 'intro' })}>
             วิธีเล่น

@@ -55,22 +55,36 @@
 - แอนิเมชันการเดินทัพและการรบ ตอนนี้แผนที่วาดใหม่ทันทีแบบไม่มี transition
 - ตรวจ Lighthouse บนมือถือ
 
-## เฟส 3 — Fastify server + Redis (ถัดไป)
+## เฟส 3 — Fastify server + Redis ✅
 
-เป้าหมาย: server เป็นผู้ตัดสิน client ส่งแค่คำสั่ง
+server เป็นผู้ตัดสิน client ส่งแค่คำสั่ง
 
-- `POST /games` สร้างเกม, `GET /games/:id` ได้ `viewFor`, `POST /games/:id/actions` ส่งคำสั่ง
-- WebSocket `/games/:id/ws` ส่ง state/event ใหม่แบบ push
-- Schema ของ request ด้วย zod (+ `fastify-type-provider-zod`) ใช้ type ร่วมกับ engine
-- ทุกคำสั่งมี `expectedVersion` และ `idempotencyKey`
-- Redis: cache state ของเกมที่กำลังเล่น, lock ต่อเกม (`SET NX PX`), กันคำสั่งซ้ำ, rate limit
-- Web: `dispatch` ส่งไป server, ทำ optimistic update ด้วย engine ในเครื่อง แล้ว reconcile ตาม version
-- Logging ด้วย pino, error เป็นรูปแบบเดียวกัน `{ error, message }`
-- Tests: route tests ด้วย `app.inject`, integration test กับ Redis จริง (docker ใน CI)
+- `POST /games` สร้างเกม (1–4 ที่นั่ง) และออก player token ให้ทีละที่นั่ง,
+  `GET /games/:id` ได้ `viewFor` ของ token นั้น, `POST /games/:id/actions` ส่งคำสั่ง
+- WebSocket `/games/:id/ws` — subscribe ก่อนแล้วจึงส่ง `sync` เพื่อไม่ให้พลาด update ระหว่างเชื่อมต่อ
+  แล้ว push `update` (view + event เฉพาะที่ผู้เล่นคนนั้นเห็นได้) ทุกครั้งที่มีคำสั่งถูกใช้
+- Schema ของ request ด้วย zod (+ `fastify-type-provider-zod`) และมี type-level check ว่า
+  `ActionSchema` ตรงกับ `Action` ของ engine เสมอ (typecheck พังถ้าเพิ่มคำสั่งแล้วลืมแก้ schema)
+- ทุกคำสั่งมี `expectedVersion` (ไม่ตรง = 409 พร้อม view ล่าสุด) และ `idempotencyKey`
+  (ส่งซ้ำได้ผลเดิม ไม่ถูกใช้สองครั้ง — ผลที่ถูกปฏิเสธก็จำไว้ด้วย)
+- Store แยกเป็น interface เดียวกันสองตัว: Redis (state + lock `SET NX PX` + compare-and-del,
+  idempotency, rate limit, pub/sub) และ in-memory สำหรับ test/dev ที่ไม่ได้รัน Redis
+- Web: `dispatch` ตรวจคำสั่งด้วย engine ในเครื่องเพื่อ feedback ทันที แล้วส่งไป server;
+  คำสั่งที่ไม่มีการสุ่มอัปเดตหน้าจอก่อน (optimistic) และ reconcile ตาม version,
+  คำสั่งที่มีการสุ่ม (โจมตี/ขอสงบศึก/จบฤดู) รอผลจาก server; สลับโหมด local/server ได้จาก HUD
+- Logging ด้วย pino, error รูปแบบเดียวกันทั้งระบบ `{ error, message, details? }`
+- 34 tests ฝั่ง server: route tests ด้วย `app.inject`, lock/idempotency แบบยิงพร้อมกัน,
+  WebSocket ด้วย `injectWS`, store contract ที่รันซ้ำกับ Redis จริง และ integration test
+  ที่ push ข้าม instance ของ server ผ่าน Redis pub/sub (`TEST_REDIS=1`)
+- 24 tests ฝั่ง web รวมโหมด server: optimistic, reconcile, 409, คำสั่งที่ถูกปฏิเสธในเครื่อง
 
-**เสร็จเมื่อ** เล่นเกมเดี่ยวผ่าน server ได้ครบ, ส่งคำสั่งซ้ำหรือคำสั่งเก่าแล้วถูกปฏิเสธถูกต้อง
+**ยังไม่ทำ (ยกไปเฟส 4 หรือ 5)**
 
-## เฟส 4 — Supabase
+- ยังไม่มีบัญชีผู้ใช้จริง — player token คือใบผ่านของที่นั่ง (ADR-0003) เฟส 4 จะเปลี่ยนเป็น Supabase JWT
+- state อยู่ใน Redis เท่านั้น มี TTL ยังไม่มี Postgres รองรับ (เฟส 4)
+- ห้องรอ/รหัสเชิญ และตัวจับเวลาฤดู (เฟส 5)
+
+## เฟส 4 — Supabase (ถัดไป)
 
 เป้าหมาย: บัญชีผู้ใช้ เซฟถาวร และประวัติที่ replay ได้
 

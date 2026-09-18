@@ -1,0 +1,32 @@
+{
+  "name": "siam-tides",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Siam: Tides of the Kingdom — turn-based grand strategy on the web",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev:web": "npm run dev -w @siam/web",
+    "dev:server": "npm run dev -w @siam/server",
+    "build": "npm run build -w @siam/engine && npm run build -w @siam/server && npm run build -w @siam/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "eslint": "^9.39.5",
+    "prettier": "^3.9.7",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^2.1.9"
+  }
+}
