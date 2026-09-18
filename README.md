@@ -23,7 +23,7 @@
 
 ```
 packages/engine   กติกาเกมทั้งหมด (TypeScript ล้วน ไม่มี framework) ใช้ร่วมกันทั้ง web และ server
-apps/web          React + Vite (+ PixiJS ในเฟส 2)
+apps/web          React + Vite + PixiJS + Zustand
 apps/server       Fastify (+ Redis ในเฟส 3, Supabase ในเฟส 4)
 supabase/         migrations (เฟส 4)
 prototype/        ต้นแบบ HTML ไฟล์เดียว
@@ -67,3 +67,4 @@ git push -u origin main --tags
 - **Deterministic** การสุ่มทั้งหมดใช้ seeded RNG ใน state ทำให้ server replay และตรวจโกงได้
 - **Server authoritative** client ส่งแค่คำสั่ง server รัน engine แล้วส่งกลับเฉพาะส่วนที่ผู้เล่นคนนั้นเห็นได้ (`viewFor`)
 - **ตัวเลขสมดุลอยู่ที่เดียว** ปรับได้ใน `packages/engine/src/data.ts` (`RULES`, `COSTS`, `SEASONS`)
+- **สีอยู่ที่เดียว** `apps/web/src/theme.ts` เป็นต้นทางทั้งของ CSS variables และสีที่ PixiJS ใช้วาดแผนที่

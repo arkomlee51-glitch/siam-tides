@@ -33,22 +33,29 @@
 
 ---
 
-## เฟส 2 — Web client เล่นคนเดียว
+## เฟส 2 — Web client เล่นคนเดียว ✅
 
-เป้าหมาย: เล่นได้เท่าต้นแบบ แต่โครงพร้อมต่อ server
+เล่นได้เท่าต้นแบบ แต่โครงพร้อมต่อ server
 
-- Zustand store: `{ state, selection, uiTab, dispatch(action) }` โดย `dispatch` เรียก engine ในเครื่อง (ต่อมาจะสลับเป็น server)
-- PixiJS v8 renderer แยกเป็น layer: terrain (สร้างครั้งเดียว, cache เป็น texture) → territory/borders → highlights → cities/armies → effects
-- กล้อง: ลาก, ซูมด้วยล้อเมาส์, pinch บนมือถือ, เลือกช่องด้วย `pixelToHex`
-- สไตล์สีน้ำ: noise texture + displacement filter, สีจาก design tokens เดียวกับต้นแบบ, โหมดมืด
-- React UI: HUD ฤดูกาล, แผงข้อมูล/การทูต/ไผ่ลู่ลม/เป้าหมาย/บันทึก, modal ข้อเสนอ (`describeDecision`), รายงานศึก, ฉากจบ + ไทม์ไลน์
-- Animation การเดินทัพและการรบแบบสั้น (เคารพ `prefers-reduced-motion`)
-- เซฟในเครื่องด้วย IndexedDB (autosave ทุกฤดู)
-- Tests: component tests (Vitest + Testing Library), Playwright smoke test เล่น 3 ฤดู
+- Zustand store (`src/store.ts`): ถือ `GameState`, การเลือกช่อง, คิว modal และ `dispatch(action)` ที่เรียก engine ในเครื่อง
+  (เฟส 3 จะสลับให้ `dispatch` ยิงไป server แล้ว reconcile)
+- PixiJS v8 renderer (`src/map/MapRenderer.ts`) แยกเป็น layer: terrain (วาดครั้งเดียวต่อธีม) →
+  territory/borders → highlights → cities/armies
+- เรขาคณิตแผนที่แยกเป็นฟังก์ชัน pure (`src/map/geometry.ts`) จึงเทสต์ได้โดยไม่ต้องมี WebGL
+- กล้อง: ลากเพื่อเลื่อน, ล้อเมาส์และสองนิ้วเพื่อซูม, ปุ่มพอดีจอ, เลือกช่องด้วย `pixelToHex`
+- ธีม: `src/theme.ts` เป็นต้นทางเดียวของสี ให้ทั้ง CSS variables และ PixiJS, สลับ auto/light/dark
+- UI ครบตามต้นแบบ: HUD ฤดูกาล, แผงข้อมูล/การทูต/ไผ่ลู่ลม/เป้าหมาย/บันทึก, modal ข้อเสนอมหาอำนาจ,
+  รายงานศึก, สรุปฤดู, ฉากจบพร้อมไทม์ไลน์
+- เซฟอัตโนมัติลง IndexedDB ทุกครั้งที่ state เปลี่ยน และโหลดต่อเมื่อเปิดใหม่
+- 17 tests: geometry, store (เดินทัพ, โจมตี, คำสั่งที่ถูกปฏิเสธ, คิว modal), component tests ของ HUD/แผง/modal
 
-**เสร็จเมื่อ** เล่นจบเกมบนเดสก์ท็อปและมือถือได้ครบทุกระบบของต้นแบบ, Lighthouse performance ≥ 85 บนมือถือ
+**ยังไม่ทำ (ยกไปเฟส 3 หรือ 6)**
 
-## เฟส 3 — Fastify server + Redis
+- Playwright smoke test (ยังไม่ได้ติดตั้งในสภาพแวดล้อมนี้)
+- แอนิเมชันการเดินทัพและการรบ ตอนนี้แผนที่วาดใหม่ทันทีแบบไม่มี transition
+- ตรวจ Lighthouse บนมือถือ
+
+## เฟส 3 — Fastify server + Redis (ถัดไป)
 
 เป้าหมาย: server เป็นผู้ตัดสิน client ส่งแค่คำสั่ง
 
