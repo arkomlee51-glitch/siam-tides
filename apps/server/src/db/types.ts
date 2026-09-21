@@ -1,0 +1,72 @@
+import type { Action, GameState, SeatId } from '@siam/engine';
+
+export interface DbSeat {
+  factionId: string;
+  seat: SeatId;
+  name: string;
+  /** null = ที่นั่ง AI — ไม่มี Supabase user ผูกอยู่ */
+  userId: string | null;
+  ending: string | null;
+}
+
+export interface DbGame {
+  id: string;
+  status: 'lobby' | 'active' | 'finished';
+  seed: number | null;
+  engineVersion: string;
+  maxTurn: number | null;
+  createdBy: string;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface DbSnapshot {
+  gameId: string;
+  turn: number;
+  /** version ของ GameRecord ตอนที่ถ่าย snapshot — action ที่ seq สูงกว่านี้เท่านั้นที่ต้อง replay ต่อ */
+  version: number;
+  state: GameState;
+}
+
+export interface DbActionEntry {
+  gameId: string;
+  seq: number;
+  userId: string | null;
+  factionId: string;
+  turn: number;
+  action: Action;
+}
+
+export interface CreateGameInput {
+  id: string;
+  engineVersion: string;
+  seed: number | undefined;
+  maxTurn: number | undefined;
+  createdBy: string;
+  seats: DbSeat[];
+}
+
+export interface ReplayData {
+  game: DbGame;
+  seats: DbSeat[];
+  /** snapshot ล่าสุด (null ถ้ายังไม่เคยถ่าย — ต้องเริ่ม replay จาก genesis ด้วย seed เดิม) */
+  snapshot: DbSnapshot | null;
+  /** action ทั้งหมดที่ seq มากกว่า snapshot.version เรียงจากน้อยไปมาก */
+  actionsSinceSnapshot: DbActionEntry[];
+}
+
+/**
+ * ข้อมูลถาวรของเฟส 4 — คู่กับ Store (Redis/memory) ที่เก็บ state ร้อน
+ * SupabaseDb ใช้ service role client จริง, MemoryDb ใช้ในเทสต์ (ไม่ต้องมี network)
+ */
+export interface Db {
+  readonly kind: 'supabase' | 'memory';
+  createGame(input: CreateGameInput): Promise<void>;
+  appendAction(entry: DbActionEntry): Promise<void>;
+  putSnapshot(snapshot: DbSnapshot): Promise<void>;
+  /** null = ไม่พบเกมนี้เลยใน Postgres (ยังไม่เคยสร้าง หรือ id ผิด) */
+  loadForReplay(gameId: string): Promise<ReplayData | null>;
+  /** best-effort — เรียกตอนเกมจบ (state.ended) ไม่ block response ถ้าล้มเหลว */
+  markFinished(gameId: string, endingByFactionId: Record<string, string>): Promise<void>;
+  close(): Promise<void>;
+}

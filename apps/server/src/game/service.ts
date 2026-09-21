@@ -1,25 +1,11 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { SEATS, applyAction, createGame, viewFor, visibleTo } from '@siam/engine';
-import type { Action, GameEvent, GameState, SeatId } from '@siam/engine';
+import { randomUUID } from 'node:crypto';
+import { ENGINE_VERSION, applyAction, createGame, viewFor, visibleTo } from '@siam/engine';
+import type { Action, GameEvent, GameState } from '@siam/engine';
+import type { Verifier } from '../auth.js';
+import type { Db, DbSeat } from '../db/index.js';
 import { AppError, forbidden, notFound, unauthorized, versionConflict } from '../errors.js';
 import type { GameRecord, SeatRecord, Store } from '../store/index.js';
 import type { CreateGameInput } from '../schemas.js';
-
-export interface PlayerCredentials {
-  factionId: string;
-  seat: SeatId;
-  name: string;
-  /** แสดงครั้งเดียวตอนสร้างเกม — server เก็บแต่ hash (เฟส 4 จะแทนด้วย Supabase JWT) */
-  token: string;
-}
-
-export interface CreatedGame {
-  gameId: string;
-  version: number;
-  seq: number;
-  players: PlayerCredentials[];
-  view: GameState;
-}
 
 export interface GameSnapshot {
   gameId: string;
@@ -28,6 +14,9 @@ export interface GameSnapshot {
   factionId: string;
   view: GameState;
 }
+
+/** เฟส 4: ผู้เล่นคือ Supabase user เดียว (ที่นั่งอื่นเป็น AI จนกว่าจะมีห้องรอ/รหัสเชิญในเฟส 5) */
+export type CreatedGame = GameSnapshot;
 
 export interface ActionOutcome extends GameSnapshot {
   events: GameEvent[];
@@ -39,80 +28,80 @@ type IdempotentResult =
   | { ok: true; outcome: GameSnapshot & { events: GameEvent[] } }
   | { ok: false; status: number; code: string; message: string };
 
-const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
-
-function sameToken(a: string, b: string): boolean {
-  const left = Buffer.from(a, 'utf8');
-  const right = Buffer.from(b, 'utf8');
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 export interface SubmitInput {
   gameId: string;
   factionId: string;
+  userId: string;
   action: Action;
   expectedVersion: number;
   idempotencyKey: string;
 }
 
 export class GameService {
-  constructor(private readonly store: Store) {}
+  constructor(
+    private readonly store: Store,
+    private readonly db: Db,
+    private readonly verifier: Verifier,
+  ) {}
 
-  async create(input: CreateGameInput): Promise<CreatedGame> {
-    const seats = input.players?.length ? input.players : [{}];
-    const humans = seats.map((p, i) => ({ id: `p${i + 1}`, name: p.name ?? SEATS[i]?.factionName }));
-    const state = createGame({ seed: input.seed, maxTurn: input.maxTurn, humans });
+  async create(input: CreateGameInput, ownerUserId: string, ownerName: string | null): Promise<CreatedGame> {
+    const displayName = input.name?.trim() || ownerName || 'ผู้เล่น';
+    const state = createGame({ seed: input.seed, maxTurn: input.maxTurn, humans: [{ id: 'p1', name: displayName }] });
+    const owner = state.factions['p1'];
+    if (!owner) throw new AppError(500, 'INTERNAL', 'สร้างเกมไม่สำเร็จ');
 
-    const records: SeatRecord[] = [];
-    const players: PlayerCredentials[] = [];
-    for (const human of humans) {
-      const faction = state.factions[human.id];
-      if (!faction) throw new AppError(500, 'INTERNAL', 'สร้างเกมไม่สำเร็จ');
-      const token = randomBytes(24).toString('base64url');
-      records.push({
-        factionId: faction.id,
-        seat: faction.seat,
-        name: faction.name,
-        tokenHash: sha256(token),
+    const seats: SeatRecord[] = Object.values(state.factions).map((f) => ({
+      factionId: f.id,
+      seat: f.seat,
+      name: f.name,
+      userId: f.kind === 'human' ? ownerUserId : null,
+    }));
+    const dbSeats: DbSeat[] = seats.map((s) => ({ ...s, ending: null }));
+    const gameId = randomUUID();
+
+    // เขียน Supabase (ถาวร) ก่อน Redis (ร้อน) — ถ้าเขียนไม่สำเร็จจะได้ไม่มีเกมค้างที่ Redis อย่างเดียวจน replay คืนไม่ได้
+    try {
+      await this.db.createGame({
+        id: gameId,
+        engineVersion: ENGINE_VERSION,
+        seed: input.seed ?? state.seed,
+        maxTurn: input.maxTurn,
+        createdBy: ownerUserId,
+        seats: dbSeats,
       });
-      players.push({ factionId: faction.id, seat: faction.seat, name: faction.name, token });
+    } catch (err) {
+      throw new AppError(503, 'STORE_UNAVAILABLE', 'บันทึกเกมไม่สำเร็จ ลองใหม่อีกครั้ง', {
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
 
     const now = new Date().toISOString();
     const record: GameRecord = {
-      id: randomUUID(),
+      id: gameId,
       version: 0,
       seq: 0,
-      seats: records,
+      seats,
       state,
       createdAt: now,
       updatedAt: now,
     };
     await this.store.putGame(record);
 
-    const first = players[0];
-    if (!first) throw new AppError(500, 'INTERNAL', 'สร้างเกมไม่สำเร็จ');
-    return {
-      gameId: record.id,
-      version: record.version,
-      seq: record.seq,
-      players,
-      view: viewFor(state, first.factionId),
-    };
+    return { gameId: record.id, version: 0, seq: 0, factionId: owner.id, view: viewFor(state, owner.id) };
   }
 
-  /** คืน factionId ของ token นี้ (โยน 401/403/404 ถ้าไม่ผ่าน) */
+  /** ตรวจ JWT แล้วหาที่นั่งของผู้ใช้คนนี้ในเกม (โยน 401/403/404 ถ้าไม่ผ่าน) */
   async authenticate(
     gameId: string,
     token: string | undefined,
-  ): Promise<{ record: GameRecord; factionId: string }> {
+  ): Promise<{ record: GameRecord; factionId: string; userId: string }> {
     if (!token) throw unauthorized();
-    const record = await this.store.getGame(gameId);
+    const auth = await this.verifier.verify(token);
+    const record = await this.loadRecord(gameId);
     if (!record) throw notFound();
-    const hash = sha256(token);
-    const seat = record.seats.find((s) => sameToken(s.tokenHash, hash));
+    const seat = record.seats.find((s) => s.userId === auth.userId);
     if (!seat) throw forbidden();
-    return { record, factionId: seat.factionId };
+    return { record, factionId: seat.factionId, userId: auth.userId };
   }
 
   /** state ที่ผู้เล่นคนหนึ่งเห็นได้ — server ต้องไม่ส่ง state ดิบออกไป */
@@ -136,13 +125,13 @@ export class GameService {
   }
 
   async view(gameId: string, factionId: string): Promise<GameSnapshot> {
-    const record = await this.store.getGame(gameId);
+    const record = await this.loadRecord(gameId);
     if (!record) throw notFound();
     return this.snapshot(record, factionId);
   }
 
   async submit(input: SubmitInput): Promise<ActionOutcome> {
-    const { gameId, factionId, action, expectedVersion, idempotencyKey } = input;
+    const { gameId, factionId, userId, action, expectedVersion, idempotencyKey } = input;
     return this.store.withLock(gameId, async () => {
       const cached = await this.store.getIdempotent<IdempotentResult>(gameId, idempotencyKey);
       if (cached) {
@@ -150,7 +139,7 @@ export class GameService {
         throw new AppError(cached.status, cached.code, cached.message);
       }
 
-      const record = await this.store.getGame(gameId);
+      const record = await this.loadRecord(gameId);
       if (!record) throw notFound();
       if (!record.seats.some((s) => s.factionId === factionId)) throw forbidden();
       if (record.version !== expectedVersion) {
@@ -173,14 +162,43 @@ export class GameService {
         throw new AppError(422, result.error, result.message);
       }
 
+      const nextSeq = record.seq + 1;
+      // เขียน action log ก่อน — ถ้าล้มเหลว Redis ยังไม่ถูกแก้ client retry ด้วย expectedVersion เดิมได้ปลอดภัย
+      try {
+        await this.db.appendAction({
+          gameId,
+          seq: nextSeq,
+          userId,
+          factionId,
+          turn: record.state.turn,
+          action,
+        });
+      } catch (err) {
+        throw new AppError(503, 'STORE_UNAVAILABLE', 'บันทึกคำสั่งไม่สำเร็จ ลองใหม่อีกครั้ง', {
+          cause: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       const next: GameRecord = {
         ...record,
         state: result.state,
         version: record.version + 1,
-        seq: record.seq + 1,
+        seq: nextSeq,
         updatedAt: new Date().toISOString(),
       };
       await this.store.putGame(next);
+
+      // snapshot ต้นฤดูใหม่ — best-effort เพราะไม่กระทบความถูกต้อง (replay จาก genesis ได้เสมอ)
+      if (next.state.turn !== record.state.turn) {
+        void this.db
+          .putSnapshot({ gameId, turn: next.state.turn, version: next.version, state: next.state })
+          .catch(() => undefined);
+      }
+      if (next.state.ended && !record.state.ended) {
+        const endings: Record<string, string> = {};
+        for (const f of Object.values(next.state.factions)) if (f.ending) endings[f.id] = f.ending;
+        void this.db.markFinished(gameId, endings).catch(() => undefined);
+      }
 
       const outcome = {
         ...this.snapshot(next, factionId),
@@ -198,5 +216,55 @@ export class GameService {
       });
       return { ...outcome, replayed: false };
     });
+  }
+
+  /** Redis มีก็ใช้เลย ไม่มี (TTL หมด/instance ใหม่) ก็โหลด snapshot ล่าสุด + replay action ที่เหลือจาก Supabase */
+  private async loadRecord(gameId: string): Promise<GameRecord | null> {
+    const cached = await this.store.getGame(gameId);
+    if (cached) return cached;
+
+    const data = await this.db.loadForReplay(gameId);
+    if (!data) return null;
+
+    const seats: SeatRecord[] = data.seats.map((s) => ({
+      factionId: s.factionId,
+      seat: s.seat,
+      name: s.name,
+      userId: s.userId,
+    }));
+
+    let state: GameState;
+    let version: number;
+    if (data.snapshot) {
+      state = data.snapshot.state;
+      version = data.snapshot.version;
+    } else {
+      const humans = data.seats
+        .filter((s): s is DbSeat & { userId: string } => s.userId !== null)
+        .map((s) => ({ id: s.factionId, name: s.name }));
+      state = createGame({ seed: data.game.seed ?? undefined, maxTurn: data.game.maxTurn ?? undefined, humans });
+      version = 0;
+    }
+
+    for (const entry of data.actionsSinceSnapshot) {
+      const result = applyAction(state, entry.factionId, entry.action);
+      // engine deterministic — replay ควรผ่านเสมอ ถ้าไม่ผ่านก็ข้าม (ดีกว่าล้มทั้งเกม) เก็บ log ไว้สืบสวนภายหลัง
+      if (result.ok) {
+        state = result.state;
+        version = entry.seq;
+      }
+    }
+
+    const record: GameRecord = {
+      id: gameId,
+      version,
+      seq: version,
+      seats,
+      state,
+      createdAt: data.game.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.store.putGame(record);
+    return record;
   }
 }

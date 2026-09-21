@@ -1,4 +1,5 @@
 import type { Action, GameEvent, GameState } from '@siam/engine';
+import { getAccessToken } from './supabase';
 
 const raw = import.meta.env.VITE_API_URL ?? 'http://localhost:8787';
 export const API_URL = raw.replace(/\/+$/, '');
@@ -21,21 +22,7 @@ export class ApiError extends Error {
   }
 }
 
-export interface PlayerCredentials {
-  factionId: string;
-  seat: string;
-  name: string;
-  token: string;
-}
-
-export interface CreatedGame {
-  gameId: string;
-  version: number;
-  seq: number;
-  players: PlayerCredentials[];
-  view: GameState;
-}
-
+/** เฟส 4: ผู้เล่นคือ Supabase user เดียว — ไม่มี token ต่อที่นั่งแบบเฟส 3 อีกแล้ว */
 export interface Snapshot {
   gameId: string;
   version: number;
@@ -43,14 +30,16 @@ export interface Snapshot {
   factionId: string;
   view: GameState;
 }
+export type CreatedGame = Snapshot;
 
 export interface ActionOutcome extends Snapshot {
   events: GameEvent[];
   replayed: boolean;
 }
 
-async function request<T>(path: string, init: RequestInit & { token?: string } = {}): Promise<T> {
-  const { token, headers, ...rest } = init;
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const { headers, ...rest } = init;
+  const token = await getAccessToken();
   const res = await fetch(`${API_URL}${path}`, {
     ...rest,
     headers: {
@@ -73,22 +62,19 @@ async function request<T>(path: string, init: RequestInit & { token?: string } =
   return body as T;
 }
 
-export const createGame = (body: { seed?: number; maxTurn?: number; players?: { name?: string }[] }) =>
+export const createGame = (body: { seed?: number; maxTurn?: number; name?: string }) =>
   request<CreatedGame>('/games', { method: 'POST', body: JSON.stringify(body) });
 
-export const fetchGame = (gameId: string, token: string) =>
-  request<Snapshot>(`/games/${gameId}`, { method: 'GET', token });
+export const fetchGame = (gameId: string) => request<Snapshot>(`/games/${gameId}`, { method: 'GET' });
 
 export const sendAction = (args: {
   gameId: string;
-  token: string;
   action: Action;
   expectedVersion: number;
   idempotencyKey: string;
 }) =>
   request<ActionOutcome>(`/games/${args.gameId}/actions`, {
     method: 'POST',
-    token: args.token,
     body: JSON.stringify({
       action: args.action,
       expectedVersion: args.expectedVersion,
@@ -96,5 +82,9 @@ export const sendAction = (args: {
     }),
   });
 
-export const wsUrl = (gameId: string, token: string) =>
-  `${API_URL.replace(/^http/, 'ws')}/games/${gameId}/ws?token=${encodeURIComponent(token)}`;
+/** ต้องดึง token ใหม่ทุกครั้ง (ไม่ใช่แค่ตอนแรก) เพราะ socket.ts เรียกก่อนต่อใหม่ทุกครั้งที่สายหลุดด้วย */
+export async function wsUrl(gameId: string): Promise<string> {
+  const token = await getAccessToken();
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_URL.replace(/^http/, 'ws')}/games/${gameId}/ws${query}`;
+}

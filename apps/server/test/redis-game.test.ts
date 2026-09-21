@@ -25,12 +25,11 @@ async function redisApp(): Promise<FastifyInstance> {
 describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Redis', () => {
   it('เล่นเกมเดี่ยวได้ครบและกันคำสั่งซ้ำ/คำสั่งเก่า', async () => {
     const app = await redisApp();
-    const game = await startGame(app, { seed: 2024 });
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1', { seed: 2024 });
     const army = armyOf(game.view, 'p1');
 
     const key = idemKey('redis-camp');
-    const first = await submit(app, game, token, {
+    const first = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: key,
@@ -38,7 +37,7 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     expect(first.statusCode).toBe(200);
     expect(first.json().version).toBe(1);
 
-    const replay = await submit(app, game, token, {
+    const replay = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: key,
@@ -46,14 +45,14 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     expect(replay.statusCode).toBe(200);
     expect(replay.json()).toMatchObject({ version: 1, replayed: true });
 
-    const stale = await submit(app, game, token, {
+    const stale = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('redis-stale'),
     });
     expect(stale.statusCode).toBe(409);
 
-    const endTurn = await submit(app, game, token, {
+    const endTurn = await submit(app, game, 'user-1', {
       action: { type: 'endTurn' },
       expectedVersion: 1,
       idempotencyKey: idemKey('redis-end'),
@@ -70,12 +69,11 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     if (!address || typeof address === 'string') throw new Error('ไม่ได้พอร์ตของ server');
 
     const writer = await redisApp();
-    const game = await startGame(writer, { seed: 77, players: [{}, {}] });
-    const [p1, p2] = game.players;
+    const game = await startGame(writer, 'user-1', { seed: 77 });
 
     const frames: { type: string; version?: number }[] = [];
     const socket = new WebSocketClient(
-      `ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=${encodeURIComponent(p1!.token)}`,
+      `ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=user-1`,
     );
     sockets.push(socket);
     socket.on('message', (raw) => frames.push(JSON.parse(String(raw)) as { type: string; version?: number }));
@@ -90,8 +88,8 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
       await new Promise((r) => setTimeout(r, 20));
     }
 
-    const army = armyOf(game.view, 'p2');
-    const res = await submit(writer, game, p2!.token, {
+    const army = armyOf(game.view, 'p1');
+    const res = await submit(writer, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('cross'),

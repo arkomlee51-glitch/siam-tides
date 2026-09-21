@@ -1,0 +1,2 @@
+-- รันอัตโนมัติหลัง migrations ทุกครั้งที่ `supabase db reset`
+-- ยังไม่มี seed data ของเฟส 4 — เกมสร้างผ่าน POST /games เท่านั้น (ดู docs/API.md)

@@ -4,8 +4,8 @@ export interface SeatRecord {
   factionId: string;
   seat: SeatId;
   name: string;
-  /** sha256 ของ player token — token จริงถูกส่งคืนครั้งเดียวตอนสร้างเกม */
-  tokenHash: string;
+  /** null = ที่นั่ง AI — เฟส 4: ผู้เล่นคือ Supabase user, identity มาจาก JWT ไม่ใช่ token ที่ server ออกเอง */
+  userId: string | null;
 }
 
 export interface GameRecord {

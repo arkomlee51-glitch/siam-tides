@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { tokenFrom } from '../auth.js';
-import { rateLimited } from '../errors.js';
+import { rateLimited, unauthorized } from '../errors.js';
 import { CreateGameBody, GameParams, SubmitActionBody } from '../schemas.js';
 
 async function guardRate(app: FastifyInstance, key: string): Promise<void> {
@@ -15,9 +15,12 @@ export async function registerGameRoutes(app: FastifyInstance): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
 
   typed.post('/games', { schema: { body: CreateGameBody } }, async (request, reply) => {
+    const token = tokenFrom(request);
+    if (!token) throw unauthorized();
+    const auth = await app.auth.verify(token);
     await guardRate(app, `create:${clientKey(request)}`);
-    const created = await app.games.create(request.body);
-    request.log.info({ gameId: created.gameId, players: created.players.length }, 'game created');
+    const created = await app.games.create(request.body, auth.userId, auth.email);
+    request.log.info({ gameId: created.gameId, factionId: created.factionId }, 'game created');
     return reply.status(201).send(created);
   });
 
@@ -31,11 +34,12 @@ export async function registerGameRoutes(app: FastifyInstance): Promise<void> {
     { schema: { params: GameParams, body: SubmitActionBody } },
     async (request, reply) => {
       const gameId = request.params.id;
-      const { factionId } = await app.games.authenticate(gameId, tokenFrom(request));
+      const { factionId, userId } = await app.games.authenticate(gameId, tokenFrom(request));
       await guardRate(app, `action:${gameId}:${factionId}`);
       const outcome = await app.games.submit({
         gameId,
         factionId,
+        userId,
         action: request.body.action,
         expectedVersion: request.body.expectedVersion,
         idempotencyKey: request.body.idempotencyKey,

@@ -11,17 +11,16 @@ afterEach(async () => {
 describe('lock ต่อเกม', () => {
   it('คำสั่งสองคำสั่งที่อ้าง version เดียวกัน สำเร็จได้แค่หนึ่ง', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
 
     const results = await Promise.all([
-      submit(app, game, token, {
+      submit(app, game, 'user-1', {
         action: { type: 'camp', armyId: army.id },
         expectedVersion: 0,
         idempotencyKey: idemKey('race-a'),
       }),
-      submit(app, game, token, {
+      submit(app, game, 'user-1', {
         action: { type: 'camp', armyId: army.id },
         expectedVersion: 0,
         idempotencyKey: idemKey('race-b'),
@@ -33,15 +32,14 @@ describe('lock ต่อเกม', () => {
     const snapshot = await app.inject({
       method: 'GET',
       url: `/games/${game.gameId}`,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: 'Bearer user-1' },
     });
     expect(snapshot.json().version).toBe(1);
   });
 
   it('idempotencyKey เดียวกันส่งพร้อมกัน ใช้คำสั่งครั้งเดียว', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
     const payload = {
       action: { type: 'camp', armyId: army.id },
@@ -49,7 +47,10 @@ describe('lock ต่อเกม', () => {
       idempotencyKey: idemKey('same'),
     };
 
-    const results = await Promise.all([submit(app, game, token, payload), submit(app, game, token, payload)]);
+    const results = await Promise.all([
+      submit(app, game, 'user-1', payload),
+      submit(app, game, 'user-1', payload),
+    ]);
 
     expect(results.every((r) => r.statusCode === 200)).toBe(true);
     expect(results.map((r) => r.json().version)).toEqual([1, 1]);

@@ -8,8 +8,12 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod';
 import { ENGINE_VERSION } from '@siam/engine';
+import { createVerifier } from './auth.js';
+import type { Verifier } from './auth.js';
 import { loadConfig } from './config.js';
 import type { Config } from './config.js';
+import { createDb } from './db/index.js';
+import type { Db } from './db/index.js';
 import { AppError } from './errors.js';
 import { GameService } from './game/service.js';
 import { createStore } from './store/index.js';
@@ -21,6 +25,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     config: Config;
     store: Store;
+    db: Db;
+    auth: Verifier;
     games: GameService;
   }
 }
@@ -30,6 +36,10 @@ export interface BuildOptions {
   config?: Partial<Config>;
   /** ใส่ store ของตัวเองเพื่อไม่ให้ app ปิดมันตอน close */
   store?: Store;
+  /** ใส่ db ของตัวเอง (เช่น MemoryDb ใน test) เพื่อไม่ให้ app ปิดมันตอน close */
+  db?: Db;
+  /** ใส่ verifier ของตัวเอง (เช่น ใน test ที่ไม่อยากออกเน็ตไปเช็ค JWKS จริง) */
+  auth?: Verifier;
   logger?: boolean;
 }
 
@@ -37,6 +47,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   const config: Config = { ...loadConfig(), ...opts.config };
   const store = opts.store ?? createStore(config);
   const ownsStore = !opts.store;
+  const db = opts.db ?? createDb(config);
+  const ownsDb = !opts.db;
+  const auth = opts.auth ?? createVerifier(config);
 
   const app = Fastify({
     logger: opts.logger ?? (config.logLevel !== 'silent' && { level: config.logLevel }),
@@ -47,7 +60,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   app.decorate('config', config);
   app.decorate('store', store);
-  app.decorate('games', new GameService(store));
+  app.decorate('db', db);
+  app.decorate('auth', auth);
+  app.decorate('games', new GameService(store, db, auth));
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
@@ -83,6 +98,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     ok: true,
     engine: ENGINE_VERSION,
     store: store.kind,
+    db: db.kind,
     time: new Date().toISOString(),
   }));
 
@@ -101,6 +117,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   app.addHook('onClose', async () => {
     if (ownsStore) await store.close();
+    if (ownsDb) await db.close();
   });
 
   return app;
