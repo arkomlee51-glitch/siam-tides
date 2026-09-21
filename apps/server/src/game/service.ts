@@ -46,7 +46,29 @@ export class GameService {
 
   async create(input: CreateGameInput, ownerUserId: string, ownerName: string | null): Promise<CreatedGame> {
     const displayName = input.name?.trim() || ownerName || 'ผู้เล่น';
-    const state = createGame({ seed: input.seed, maxTurn: input.maxTurn, humans: [{ id: 'p1', name: displayName }] });
+    return this.createWithHumans([{ userId: ownerUserId, name: displayName }], input.seed, input.maxTurn);
+  }
+
+  /** เฟส 5: สร้างเกมจากห้องรอที่ครบที่นั่งแล้ว — เจ้าของห้อง (index 0) ได้ที่นั่ง p1 เสมอ ที่เหลือ p2..p4 ตามลำดับที่เข้าร่วม */
+  async createFromLobby(
+    seats: { userId: string; name: string }[],
+    seed: number | undefined,
+    maxTurn: number | undefined,
+  ): Promise<CreatedGame> {
+    return this.createWithHumans(seats, seed, maxTurn);
+  }
+
+  private async createWithHumans(
+    humans: { userId: string; name: string }[],
+    seed: number | undefined,
+    maxTurn: number | undefined,
+  ): Promise<CreatedGame> {
+    const state = createGame({
+      seed,
+      maxTurn,
+      humans: humans.map((h, i) => ({ id: `p${i + 1}`, name: h.name })),
+    });
+    const userIdByFaction = new Map<string, string>(humans.map((h, i) => [`p${i + 1}`, h.userId]));
     const owner = state.factions['p1'];
     if (!owner) throw new AppError(500, 'INTERNAL', 'สร้างเกมไม่สำเร็จ');
 
@@ -54,7 +76,7 @@ export class GameService {
       factionId: f.id,
       seat: f.seat,
       name: f.name,
-      userId: f.kind === 'human' ? ownerUserId : null,
+      userId: f.kind === 'human' ? (userIdByFaction.get(f.id) ?? null) : null,
     }));
     const dbSeats: DbSeat[] = seats.map((s) => ({ ...s, ending: null }));
     const gameId = randomUUID();
@@ -64,9 +86,9 @@ export class GameService {
       await this.db.createGame({
         id: gameId,
         engineVersion: ENGINE_VERSION,
-        seed: input.seed ?? state.seed,
-        maxTurn: input.maxTurn,
-        createdBy: ownerUserId,
+        seed: seed ?? state.seed,
+        maxTurn,
+        createdBy: humans[0]!.userId,
         seats: dbSeats,
       });
     } catch (err) {

@@ -34,6 +34,25 @@ export interface RateLimitResult {
   resetSeconds: number;
 }
 
+/** ที่นั่งในห้องรอ ก่อนเกมจะถูกสร้างจริง — ยังไม่มี factionId/seat ของ engine จนกว่าจะ start */
+export interface LobbySeat {
+  userId: string;
+  name: string;
+}
+
+/** เฟส 5: ห้องรอ + รหัสเชิญ — เก็บใน Redis ชั่วคราว (TTL, ดู lobbyTtlSeconds) ไม่ผ่าน Supabase เพราะยังไม่ใช่เกมจริง */
+export interface LobbyRecord {
+  code: string;
+  hostUserId: string;
+  seed: number | undefined;
+  maxTurn: number | undefined;
+  /** เรียงตามลำดับที่เข้าร่วม — index 0 คือ host และจะได้ที่นั่ง p1 เสมอตอน start */
+  seats: LobbySeat[];
+  /** ตั้งตอน start แล้ว — client ที่ poll เจอค่านี้ให้ไป GET /games/:id ต่อ (ห้องรอเองปล่อยให้หมดอายุไปเอง) */
+  startedGameId: string | null;
+  createdAt: string;
+}
+
 export interface Store {
   readonly kind: 'redis' | 'memory';
   getGame(id: string): Promise<GameRecord | null>;
@@ -45,6 +64,13 @@ export interface Store {
   hitRateLimit(key: string): Promise<RateLimitResult>;
   publish(gameId: string, update: GameUpdate): Promise<void>;
   subscribe(gameId: string, handler: (update: GameUpdate) => void): Promise<() => Promise<void>>;
+
+  getLobby(code: string): Promise<LobbyRecord | null>;
+  putLobby(record: LobbyRecord): Promise<void>;
+  deleteLobby(code: string): Promise<void>;
+  /** lock ต่อห้องรอ กันสองคนกด join/leave/start พร้อมกันแล้วที่นั่งชนกัน */
+  withLobbyLock<T>(code: string, fn: () => Promise<T>): Promise<T>;
+
   ping(): Promise<void>;
   close(): Promise<void>;
 }
@@ -56,4 +82,5 @@ export interface StoreOptions {
   lockWaitMs: number;
   rateLimitMax: number;
   rateLimitWindowSeconds: number;
+  lobbyTtlSeconds: number;
 }

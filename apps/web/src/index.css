@@ -790,6 +790,18 @@ ul.chron li span {
   color: var(--ink2);
 }
 
+.lobby-code-input {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.lobby-seats li.empty {
+  opacity: 0.55;
+  font-style: italic;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;

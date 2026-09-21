@@ -57,3 +57,21 @@ export const SubmitActionBody = z.object({
 export type SubmitActionInput = z.infer<typeof SubmitActionBody>;
 
 export const WsQuery = z.object({ token: z.string().min(1).max(200).optional() });
+
+/* ---------- เฟส 5: ห้องรอ/รหัสเชิญ ---------- */
+export const CreateLobbyBody = z.object({
+  seed: z.coerce.number().int().min(0).max(0xffffffff).optional(),
+  maxTurn: z.coerce.number().int().min(1).max(120).optional(),
+  /** ชื่อของผู้สร้างห้อง (host ได้ที่นั่ง p1 เสมอตอน start) */
+  name: z.string().trim().min(1).max(40).optional(),
+});
+export type CreateLobbyInput = z.infer<typeof CreateLobbyBody>;
+
+/** รหัสเชิญ 6 หลัก ตัวพิมพ์ใหญ่ + เลข ตัด 0/O/1/I/L ที่อ่านสับสนออกแล้วตอนสุ่ม (ดู game/lobby.ts) */
+export const LobbyParams = z.object({ code: z.string().trim().toUpperCase().length(6) });
+
+export const JoinLobbyBody = z.object({
+  name: z.string().trim().min(1).max(40).optional(),
+});
+export type JoinLobbyInput = z.infer<typeof JoinLobbyBody>;
+

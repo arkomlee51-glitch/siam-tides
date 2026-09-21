@@ -88,3 +88,31 @@ export async function wsUrl(gameId: string): Promise<string> {
   const query = token ? `?token=${encodeURIComponent(token)}` : '';
   return `${API_URL.replace(/^http/, 'ws')}/games/${gameId}/ws${query}`;
 }
+
+/* ---------- เฟส 5: ห้องรอ/รหัสเชิญ ---------- */
+export interface LobbySeat {
+  userId: string;
+  name: string;
+}
+export interface Lobby {
+  code: string;
+  hostUserId: string;
+  seed?: number;
+  maxTurn?: number;
+  seats: LobbySeat[];
+  /** ตั้งแล้ว = host กด "เริ่มเกม" ไปแล้ว — ไปดึงเกมด้วย gameId นี้ต่อ */
+  startedGameId: string | null;
+}
+
+export const createLobby = (body: { seed?: number; maxTurn?: number; name?: string }) =>
+  request<Lobby>('/lobbies', { method: 'POST', body: JSON.stringify(body) });
+
+export const fetchLobby = (code: string) => request<Lobby>(`/lobbies/${code}`, { method: 'GET' });
+
+export const joinLobby = (code: string, name?: string) =>
+  request<Lobby>(`/lobbies/${code}/join`, { method: 'POST', body: JSON.stringify(name ? { name } : {}) });
+
+export const leaveLobby = (code: string) =>
+  request<null>(`/lobbies/${code}/leave`, { method: 'POST' });
+
+export const startLobby = (code: string) => request<CreatedGame>(`/lobbies/${code}/start`, { method: 'POST' });

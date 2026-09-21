@@ -83,15 +83,16 @@ RLS เปิดทุกตาราง มีเฉพาะ policy อ่า�
 `is_game_participant`) — เขียนได้เฉพาะ service-role key ของ server เท่านั้น (bypass RLS โดยตรง จึงไม่มี
 write policy เลย) รายละเอียดและเหตุผลอยู่ใน [ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)
 
-## Redis keys (เฟส 3 — ใช้อยู่)
+## Redis keys (เฟส 3–5 — ใช้อยู่)
 
 ```
 game:{id}:state      JSON ของ GameState + version
 game:{id}:lock       SET NX PX 2000
 game:{id}:events     pub/sub channel
 idem:{id}:{key}      ผลลัพธ์ของคำสั่ง (TTL 10 นาที)
-lobby:{code}         game id (TTL 1 ชั่วโมง) — เฟส 5
-rl:{key}             rate limit counter (create:{ip}, action:{gameId}:{factionId})
+lobby:{code}         JSON ของ LobbyRecord — host, seats, startedGameId (TTL LOBBY_TTL_SECONDS, ค่าเริ่มต้น 1 ชั่วโมง)
+lobby:{code}:lock    SET NX PX — กัน join/leave/start ชนกัน (เฟส 5, ดู ADR-0005)
+rl:{key}             rate limit counter (create:{ip}, create-lobby:{ip}, join-lobby:{ip}, action:{gameId}:{factionId})
 ```
 
 ## สิ่งที่ต้องกลับมาทบทวน

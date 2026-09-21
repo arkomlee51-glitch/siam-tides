@@ -1,4 +1,4 @@
-# API (เฟส 4)
+# API (เฟส 4 + ห้องรอเฟส 5)
 
 Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได้ที่ `VITE_API_URL` ฝั่ง web)
 
@@ -114,6 +114,60 @@ WebSocket เฟรมเป็น JSON บรรทัดเดียว
 server subscribe ให้ก่อนแล้วจึงส่ง `sync` จึงไม่มีช่องที่ update จะหลุดหาย
 client ทิ้งเฟรมที่ `version` ไม่สูงกว่าที่ถืออยู่
 
+## เฟส 5: ห้องรอ + รหัสเชิญ
+
+สร้างเกมหลายคนต้องผ่านห้องรอก่อนเสมอ (`POST /games` ยังสร้างได้แค่ที่นั่งมนุษย์เดียวเหมือนเดิม) — ดู
+[ADR-0005](adr/0005-lobby-and-invite-codes.md) ทุก endpoint ต้องมี `Authorization` เหมือนกับ `/games`
+
+### `POST /lobbies`
+
+```jsonc
+// request — ทุกฟิลด์ไม่บังคับ
+{ "seed": 12345, "maxTurn": 30, "name": "อาณาจักรนที" }
+```
+
+```jsonc
+// 201 — ผู้สร้างได้ที่นั่งแรกอัตโนมัติ (จะกลายเป็น p1 เสมอตอนเริ่มเกม)
+{
+  "code": "K7M3XQ",
+  "hostUserId": "uuid ของผู้สร้าง",
+  "seed": 12345,
+  "maxTurn": 30,
+  "seats": [{ "userId": "…", "name": "อาณาจักรนที" }],
+  "startedGameId": null,
+}
+```
+
+รหัสห้อง 6 หลัก ตัวพิมพ์ใหญ่ + เลข ตัดตัวที่อ่านสับสน (`0/O`, `1/I/L`) ออกแล้ว
+
+### `GET /lobbies/:code`
+
+คืนสถานะห้องปัจจุบัน (รูปแบบเดียวกับตอนสร้าง) — client โพลทุก ~2 วินาทีเพื่อดูสมาชิกใหม่และ
+`startedGameId`; ห้องไม่มี/หมดอายุแล้วได้ `404 LOBBY_NOT_FOUND`
+
+### `POST /lobbies/:code/join`
+
+```jsonc
+// request — ไม่บังคับ
+{ "name": "เพื่อนผู้เล่น" }
+```
+
+เข้าร่วมที่นั่งถัดไป (สูงสุด 4 คน) เรียกซ้ำด้วย user เดิมได้ผลเดิม (idempotent, แก้แค่ชื่อถ้าส่งมาใหม่)
+ห้องเต็มแล้วได้ `422 LOBBY_FULL`, ห้องเริ่มไปแล้วได้ `409 LOBBY_STARTED` (พร้อม `details.gameId`)
+
+### `POST /lobbies/:code/leave`
+
+`204` เสมอ (no-op ถ้าไม่ใช่สมาชิกอยู่แล้ว) — **host ออก = ยกเลิกห้องทั้งหมด** สมาชิกที่เหลือจะเจอ
+`404` ตอน poll ครั้งถัดไป
+
+### `POST /lobbies/:code/start`
+
+เฉพาะ host เรียกได้ (`403 FORBIDDEN` ถ้าไม่ใช่) — สร้างเกมจริงจากที่นั่งทั้งหมดตอนนั้น (เขียน Supabase +
+Redis เหมือน `POST /games`) แล้วคืน `Snapshot` ของ host (`factionId: "p1"` เสมอ) ที่นั่งอื่นต้องไป
+`GET /games/:id` เองด้วย token ของตัวเองเพื่อได้ `factionId`/`view` ของตน ห้องไม่ถูกลบทันที
+(`startedGameId` ถูกตั้งไว้ให้คนที่ยัง poll เจอ แล้วปล่อยให้หมดอายุไปเองตาม TTL) เรียกซ้ำได้
+`409 LOBBY_STARTED`
+
 ## Error codes
 
 | HTTP | error                 | เมื่อไหร่                                                                                  |
@@ -127,6 +181,9 @@ client ทิ้งเฟรมที่ `version` ไม่สูงกว่�
 | 429  | `RATE_LIMITED`        | ส่งถี่เกิน `details.resetSeconds` บอกเวลาที่ต้องรอ                                         |
 | 503  | `LOCK_TIMEOUT`        | รอ lock ของเกมนานเกิน `LOCK_WAIT_MS`                                                       |
 | 503  | `STORE_UNAVAILABLE`   | `/readyz` ต่อ store ไม่ได้                                                                 |
+| 404  | `LOBBY_NOT_FOUND`     | ไม่มีห้องรอรหัสนี้ หรือหมดอายุแล้ว                                                          |
+| 422  | `LOBBY_FULL`          | ห้องรอเต็มแล้ว (4 คน)                                                                       |
+| 409  | `LOBBY_STARTED`       | ห้องรอนี้เริ่มเกมไปแล้ว — `details.gameId` มี id ของเกมให้ไปต่อ                            |
 
 ## ลำดับการประมวลผลคำสั่ง
 

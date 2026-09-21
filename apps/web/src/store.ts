@@ -11,7 +11,18 @@ import {
 } from '@siam/engine';
 import type { Action, Army, BattleReport, FactionId, GameEvent, GameState, ReachTile } from '@siam/engine';
 import { loadSave, saveGame, clearSave } from './persist';
-import { ApiError, createGame as createServerGame, fetchGame, sendAction } from './api/client';
+import {
+  ApiError,
+  createGame as createServerGame,
+  createLobby as createServerLobby,
+  fetchGame,
+  fetchLobby,
+  joinLobby as joinServerLobby,
+  leaveLobby as leaveServerLobby,
+  sendAction,
+  startLobby as startServerLobby,
+} from './api/client';
+import type { Lobby } from './api/client';
 import { clearSession, loadSession, saveSession } from './api/session';
 import type { OnlineSession } from './api/session';
 import { connectGameSocket } from './api/socket';
@@ -29,6 +40,7 @@ export type Modal =
   | { kind: 'battle'; report: BattleReport }
   | { kind: 'ending' }
   | { kind: 'account' }
+  | { kind: 'lobby' }
   | { kind: 'confirm'; title: string; body: string; confirmLabel: string; danger?: boolean; action: Action };
 
 export const ME: FactionId = 'p1';
@@ -68,6 +80,9 @@ export interface Store {
   /** จำนวนคำสั่งที่ยังรอคำตอบจาก server */
   inFlight: number;
   socket: GameSocket | null;
+  /** เฟส 5: ห้องรอที่กำลังอยู่ (ก่อนเกมเริ่ม) — null ถ้าไม่ได้อยู่ในห้องรอ */
+  lobby: Lobby | null;
+  lobbyBusy: boolean;
 
   dispatch: (action: Action) => boolean;
   clickTile: (c: number, r: number) => void;
@@ -86,6 +101,13 @@ export interface Store {
   refresh: () => Promise<void>;
   applyServer: (version: number, view: GameState, events: GameEvent[]) => void;
   openSocket: () => void;
+
+  /** เฟส 5: ห้องรอ/รหัสเชิญ */
+  createLobby: () => Promise<void>;
+  joinLobby: (code: string) => Promise<void>;
+  refreshLobby: () => Promise<void>;
+  leaveLobby: () => Promise<void>;
+  startLobby: () => Promise<void>;
 }
 
 const fresh = (seed?: number) => createGame({ seed, humans: [{ id: ME, name: MY_NAME }] });
@@ -104,6 +126,8 @@ export const useStore = create<Store>((set, get) => ({
   connection: 'offline',
   inFlight: 0,
   socket: null,
+  lobby: null,
+  lobbyBusy: false,
 
   dispatch(action) {
     return get().mode === 'server' ? dispatchOnline(set, get, action) : dispatchLocal(set, get, action);
@@ -199,22 +223,9 @@ export const useStore = create<Store>((set, get) => ({
     try {
       await ensureSession();
       const created = await createServerGame({ seed, name: MY_NAME });
-      const session: OnlineSession = { gameId: created.gameId, factionId: created.factionId };
-      saveSession(session);
-      void clearSave();
-      set({
-        mode: 'server',
-        session,
-        state: created.view,
-        version: created.version,
-        sel: null,
-        tab: 'info',
-        modals: [{ kind: 'intro' }],
-        toast: null,
-        loaded: true,
-        inFlight: 0,
-      });
-      get().openSocket();
+      enterServer(set, get, { gameId: created.gameId, factionId: created.factionId }, created.view, created.version, [
+        { kind: 'intro' },
+      ]);
     } catch (err) {
       set({ connection: 'offline' });
       get().showToast(
@@ -229,29 +240,92 @@ export const useStore = create<Store>((set, get) => ({
     try {
       await ensureSession();
       const snapshot = await fetchGame(gameId);
-      const session: OnlineSession = { gameId, factionId: snapshot.factionId };
-      saveSession(session);
-      void clearSave();
-      set({
-        mode: 'server',
-        session,
-        state: snapshot.view,
-        version: snapshot.version,
-        sel: null,
-        tab: 'info',
-        modals: [],
-        toast: null,
-        loaded: true,
-        inFlight: 0,
-      });
-      get().openSocket();
+      enterServer(set, get, { gameId, factionId: snapshot.factionId }, snapshot.view, snapshot.version, []);
     } catch (err) {
       set({ connection: 'offline' });
       get().showToast(err instanceof ApiError ? err.message : 'เข้าเกมนี้ไม่สำเร็จ');
     }
   },
 
+  async createLobby() {
+    if (get().lobbyBusy) return;
+    set({ lobbyBusy: true });
+    try {
+      await ensureSession();
+      const lobby = await createServerLobby({ name: MY_NAME });
+      set({ lobby });
+      startLobbyPolling(get);
+    } catch (err) {
+      get().showToast(err instanceof ApiError ? err.message : 'สร้างห้องรอไม่สำเร็จ');
+    } finally {
+      set({ lobbyBusy: false });
+    }
+  },
+
+  async joinLobby(code) {
+    if (get().lobbyBusy) return;
+    set({ lobbyBusy: true });
+    try {
+      await ensureSession();
+      const lobby = await joinServerLobby(code.trim().toUpperCase(), MY_NAME);
+      set({ lobby });
+      startLobbyPolling(get);
+    } catch (err) {
+      get().showToast(err instanceof ApiError ? err.message : 'เข้าร่วมห้องไม่สำเร็จ ตรวจรหัสอีกครั้ง');
+    } finally {
+      set({ lobbyBusy: false });
+    }
+  },
+
+  async refreshLobby() {
+    const code = get().lobby?.code;
+    if (!code) return;
+    try {
+      const lobby = await fetchLobby(code);
+      if (lobby.startedGameId) {
+        // host เริ่มเกมแล้วจากอีกที่นั่งหนึ่ง — ดึงเกมจริงมาแทนที่ห้องรอ
+        stopLobbyPolling();
+        const gameId = lobby.startedGameId;
+        set({ lobby: null });
+        await get().resumeOnline(gameId);
+        return;
+      }
+      set({ lobby });
+    } catch {
+      // ห้องหายไปแล้ว (เช่น host ออก หรือ TTL หมด) — เลิก poll เงียบ ๆ ให้ UI แสดงว่าห้องถูกยกเลิก
+      stopLobbyPolling();
+      set({ lobby: null });
+    }
+  },
+
+  async leaveLobby() {
+    const code = get().lobby?.code;
+    stopLobbyPolling();
+    set({ lobby: null });
+    if (code) await leaveServerLobby(code).catch(() => undefined);
+  },
+
+  async startLobby() {
+    const code = get().lobby?.code;
+    if (!code || get().lobbyBusy) return;
+    set({ lobbyBusy: true });
+    try {
+      const created = await startServerLobby(code);
+      stopLobbyPolling();
+      set({ lobby: null });
+      enterServer(set, get, { gameId: created.gameId, factionId: created.factionId }, created.view, created.version, [
+        { kind: 'intro' },
+      ]);
+    } catch (err) {
+      get().showToast(err instanceof ApiError ? err.message : 'เริ่มเกมไม่สำเร็จ');
+    } finally {
+      set({ lobbyBusy: false });
+    }
+  },
+
   goOffline() {
+    stopLobbyPolling();
+    set({ lobby: null });
     get().socket?.close();
     clearSession();
     set({ mode: 'local', session: null, socket: null, connection: 'offline', inFlight: 0, version: 0 });
@@ -300,6 +374,45 @@ export const useStore = create<Store>((set, get) => ({
 
 type Set = (partial: Partial<Store>) => void;
 type Get = () => Store;
+
+/** ใช้ร่วมกันโดย goOnline/resumeOnline/startLobby — ต่างกันแค่ session/state/version/modals ตอนเข้าโหมด server */
+function enterServer(
+  set: Set,
+  get: Get,
+  session: OnlineSession,
+  view: GameState,
+  version: number,
+  modals: Modal[],
+): void {
+  saveSession(session);
+  void clearSave();
+  set({
+    mode: 'server',
+    session,
+    state: view,
+    version,
+    sel: null,
+    tab: 'info',
+    modals,
+    toast: null,
+    loaded: true,
+    inFlight: 0,
+  });
+  get().openSocket();
+}
+
+/** timer ของการ poll ห้องรอ — เก็บนอก store เพราะไม่ใช่ state ที่ต้อง re-render ตาม */
+let lobbyPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startLobbyPolling(get: Get): void {
+  stopLobbyPolling();
+  lobbyPollTimer = setInterval(() => void get().refreshLobby(), 2000);
+}
+
+function stopLobbyPolling(): void {
+  if (lobbyPollTimer) clearInterval(lobbyPollTimer);
+  lobbyPollTimer = null;
+}
 
 /** โหมดในเครื่อง: engine ตัดสินทันที (พฤติกรรมเดียวกับเฟส 2) */
 function dispatchLocal(set: Set, get: Get, action: Action): boolean {
