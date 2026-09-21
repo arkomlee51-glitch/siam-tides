@@ -79,6 +79,19 @@ cheap ก่อน (`isSeasonTimerDue`) แล้วค่อยขอ `store.wi
 | ตัวจับเวลาแบบ background job/cron ต่อเกม                     | บังคับจบฤดูตรงเวลาแม่นกว่า แม้ไม่มีใครเข้ามาดู               | ต้องจัดการว่า instance ไหนเป็นเจ้าของงานนี้ในระบบหลาย instance ซับซ้อนขึ้นมาก |
 | เขียน `seasonTimerSeconds` ลง Supabase ด้วย (migration ใหม่) | ทนต่อ cold-start replay ได้เต็มรูปแบบ                        | ต้องออกแบบ+ทดสอบ migration ใหม่ — ใหญ่เกินขอบเขตรอบนี้                       |
 
+## Addendum (รอบต่อมาในวันเดียวกัน): ยืนยัน WebSocket เชื่อมต่อใหม่กับเกมหลายคน
+
+หลัง ADR นี้ได้รับการ accept แล้ว เพิ่มเทสต์ยืนยัน (ไม่ได้แก้โค้ด — `authenticate()`/`view()` ที่ใช้โดย
+`routes/ws.ts` ตอน connect/resync ผ่าน `maybeExpireSeason` ที่ทำไว้แล้วในข้อ 5–7 ด้านบนอยู่แล้ว) ว่า
+สัญญา (contract) ที่ WebSocket route คืนให้ตอน connect ใหม่หรือส่ง `resync` ถูกต้องเสมอแม้กับผู้เล่นหลายคน
+พร้อมกันจริง — ทดสอบ 4 คนต่อ WS พร้อมกัน, คนหนึ่งปิดสายกลางฤดูขณะอีกสามคนเล่นต่อ, แล้วต่อใหม่ด้วย
+connection คนละตัว ต้องได้ state ล่าสุดถูกต้องครบไม่ตกหล่น (`apps/server/test/multiplayer-reconnect-ws.test.ts`,
+ใช้ memory store ในกระบวนการเดียว ไม่ต้องมี Redis จริง) — ปิดช่องว่างข้อ "เชื่อมต่อใหม่อัตโนมัติกับเกมหลายคน
+จริง" ใน ROADMAP.md เฟส 5 เกือบทั้งหมด เหลือแค่ยืนยันแบบเดียวกันข้าม server instance จริงผ่าน Redis จริง
+(ข้อ 8 ด้านบน กับรายการ Redis pub/sub ข้าม instance) ซึ่งทำต่อในสภาพแวดล้อมที่พัฒนา ADR นี้ไม่ได้เลย —
+ไม่มี Docker, ไม่มีสิทธิ์ root ให้ติดตั้ง redis-server, และ `npm install redis-memory-server` ดาวน์โหลด
+binary ไม่สำเร็จ (network allowlist ของเครื่องนี้)
+
 ## Consequences
 
 - `tribute`/`festival`/`annex` ยังใช้ได้แค่กับ AI เหมือนเดิม — การทูตมนุษย์-มนุษย์รอบนี้มีแค่สงบศึก
