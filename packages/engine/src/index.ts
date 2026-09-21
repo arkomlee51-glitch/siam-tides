@@ -32,4 +32,6 @@ export { applyAction, foundBlocker, ERROR_MESSAGES } from './actions.js';
 export { viewFor, describeDecision, fmtCost, seasonalCost } from './views.js';
 export type { DecisionInfo, DecisionOption } from './views.js';
 
+export * from './content/index.js';
+
 export const ENGINE_VERSION = '0.1.0';
