@@ -84,19 +84,35 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
 - state อยู่ใน Redis เท่านั้น มี TTL ยังไม่มี Postgres รองรับ (เฟส 4)
 - ห้องรอ/รหัสเชิญ และตัวจับเวลาฤดู (เฟส 5)
 
-## เฟส 4 — Supabase (ถัดไป)
+## เฟส 4 — Supabase ✅
 
 เป้าหมาย: บัญชีผู้ใช้ เซฟถาวร และประวัติที่ replay ได้
 
-- Supabase Auth (magic link + anonymous sign-in แล้วค่อยผูกบัญชี)
-- Server ตรวจ JWT ของ Supabase ทุก request
-- Migrations: `profiles`, `games`, `game_players`, `game_snapshots`, `game_actions` (ดู ARCHITECTURE)
-- RLS: ผู้เล่นอ่านได้เฉพาะเกมที่ตนอยู่, เขียนได้เฉพาะ server (service role)
-- Event sourcing: เก็บทุกคำสั่ง + snapshot ต้นฤดู → โหลดเกม = snapshot ล่าสุด + replay คำสั่ง
-- หน้า "เกมของฉัน": เล่นต่อ, ดูไทม์ไลน์เกมที่จบแล้ว
-- Tests: migration test ด้วย `supabase db reset`, RLS test, replay test (state จาก replay ต้องเท่ากับ state ที่เก็บ)
+- Supabase Auth: anonymous sign-in อัตโนมัติตอนเปิดเกม (`ensureSession()`) แล้วผูกอีเมลทีหลังได้
+  (`linkEmail()` ในหน้า "บัญชี") — บัญชี anonymous เดิมกลายเป็นบัญชีถาวร เกม/เซฟเดิมไม่หาย
+- Server ตรวจ JWT ของ Supabase ทุก request ด้วย JWKS เป็นค่าเริ่มต้น (หรือ HS256 secret สำหรับโปรเจกต์เก่า)
+  ดู [ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)
+- Migrations: `profiles`, `game_players`, `games`, `game_snapshots`, `game_actions`
+  (`supabase/migrations/20260918000000_init_schema.sql`) — ตรวจจริงด้วย Postgres 16 local
+- RLS: ผู้เล่นอ่านได้เฉพาะเกมที่ตนอยู่ (ผ่าน `is_game_participant`), เขียนได้เฉพาะ server (service role) เท่านั้น
+- Event sourcing: `GameService` เขียน `game_actions` ก่อนเสมอ (รอผลจริง) ก่อนแก้ Redis, snapshot ต้นฤดูใหม่
+  แบบ fire-and-forget → Redis หมดอายุหรือ instance ใหม่โหลด snapshot ล่าสุด + replay คำสั่งที่เหลือแทน
+- หน้า "บัญชี": ผูกอีเมล, ดูรายชื่อ "เกมของฉัน" พร้อมปุ่มเล่นต่อ (`GET`-ary query ผ่าน Supabase client ตรง ๆ
+  จาก `game_players` join `games`)
+- Tests: replay ตรวจสามชั้น — engine-level equivalence, `MemoryDb` round-trip
+  (`apps/server/test/db.test.ts`), HTTP integration ที่ทำให้ Redis หมดอายุจริงแล้วเช็คว่า
+  `GET /games/:id` คืน state เดิมทุกบิต (`apps/server/test/replay.test.ts`); auth ตรวจ HS256 JWT
+  ทุกเคส (`apps/server/test/auth.test.ts`); migration/RLS ตรวจด้วย Postgres local (ไม่ใช่ `supabase db reset`
+  เพราะไม่มี Docker ในสภาพแวดล้อมที่พัฒนา)
 
 **เสร็จเมื่อ** ปิดเบราว์เซอร์แล้วกลับมาเล่นต่อได้บนเครื่องอื่น
+
+**ยังไม่ทำ / ต้องทำต่อ**
+
+- ยังไม่ได้รันกับโปรเจกต์ Supabase จริงของผู้ใช้ — ต้องเติม `SUPABASE_URL` และ `SUPABASE_SERVICE_ROLE_KEY`
+  ใน `.env` แล้ว push migration (`npx supabase db push` หรือรันผ่าน SQL editor ของ dashboard) เอง
+- หลายที่นั่งมนุษย์ผ่าน API ยังทำไม่ได้ (`POST /games` สร้างที่นั่งมนุษย์เดียวคือผู้สร้าง) — ห้องรอ/รหัสเชิญ
+  เพื่อชวนคนอื่นเข้าที่นั่งที่เหลือยกไปเฟส 5 ตามแผนเดิม
 
 ## เฟส 5 — Multiplayer 2–4 คน
 

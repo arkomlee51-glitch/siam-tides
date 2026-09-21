@@ -29,8 +29,11 @@ export interface GameSocket {
 
 const MAX_DELAY_MS = 15_000;
 
-/** ต่อ WebSocket ใหม่เองเมื่อสายหลุด แล้วขอ resync เพื่อไล่สถานะให้ทัน */
-export function connectGameSocket(gameId: string, token: string, handlers: SocketHandlers): GameSocket {
+/**
+ * ต่อ WebSocket ใหม่เองเมื่อสายหลุด แล้วขอ resync เพื่อไล่สถานะให้ทัน
+ * ดึง access token ใหม่ทุกครั้งก่อนต่อ (ไม่ใช่แค่ตอนแรก) เพราะ Supabase token อายุสั้นและต่ออายุเอง
+ */
+export function connectGameSocket(gameId: string, handlers: SocketHandlers): GameSocket {
   let socket: WebSocket | null = null;
   let stopped = false;
   let attempt = 0;
@@ -42,27 +45,30 @@ export function connectGameSocket(gameId: string, token: string, handlers: Socke
       return;
     }
     handlers.onStatus('connecting');
-    const ws = new WebSocket(wsUrl(gameId, token));
-    socket = ws;
-    ws.onopen = () => {
-      attempt = 0;
-      handlers.onStatus('online');
-    };
-    ws.onmessage = (event: MessageEvent) => {
-      try {
-        handlers.onFrame(JSON.parse(String(event.data)) as ServerFrame);
-      } catch {
-        /* เฟรมที่อ่านไม่ออกก็ข้าม */
-      }
-    };
-    ws.onclose = () => {
-      if (socket === ws) socket = null;
-      handlers.onStatus('offline');
-      if (!stopped) schedule();
-    };
-    ws.onerror = () => {
-      /* onclose จะตามมาเอง */
-    };
+    void wsUrl(gameId).then((url) => {
+      if (stopped) return;
+      const ws = new WebSocket(url);
+      socket = ws;
+      ws.onopen = () => {
+        attempt = 0;
+        handlers.onStatus('online');
+      };
+      ws.onmessage = (event: MessageEvent) => {
+        try {
+          handlers.onFrame(JSON.parse(String(event.data)) as ServerFrame);
+        } catch {
+          /* เฟรมที่อ่านไม่ออกก็ข้าม */
+        }
+      };
+      ws.onclose = () => {
+        if (socket === ws) socket = null;
+        handlers.onStatus('offline');
+        if (!stopped) schedule();
+      };
+      ws.onerror = () => {
+        /* onclose จะตามมาเอง */
+      };
+    });
   };
 
   const schedule = () => {

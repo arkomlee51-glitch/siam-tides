@@ -1,10 +1,9 @@
 const KEY = 'siam-online-session';
 
+/** เฟส 4: token มาจาก Supabase session (สดใหม่เสมอ, ต่ออายุเอง) — เก็บไว้แค่ตัวชี้ว่ากำลังเล่นเกมไหน/ที่นั่งไหน */
 export interface OnlineSession {
   gameId: string;
   factionId: string;
-  /** player token ที่ server ออกให้ตอนสร้างเกม (เฟส 4 จะเปลี่ยนเป็น Supabase JWT) */
-  token: string;
 }
 
 export function loadSession(): OnlineSession | null {
@@ -12,8 +11,8 @@ export function loadSession(): OnlineSession | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OnlineSession>;
-    if (!parsed.gameId || !parsed.factionId || !parsed.token) return null;
-    return { gameId: parsed.gameId, factionId: parsed.factionId, token: parsed.token };
+    if (!parsed.gameId || !parsed.factionId) return null;
+    return { gameId: parsed.gameId, factionId: parsed.factionId };
   } catch {
     return null;
   }

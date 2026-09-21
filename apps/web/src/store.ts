@@ -16,6 +16,7 @@ import { clearSession, loadSession, saveSession } from './api/session';
 import type { OnlineSession } from './api/session';
 import { connectGameSocket } from './api/socket';
 import type { Connection, GameSocket } from './api/socket';
+import { ensureSession } from './api/supabase';
 
 export type Tab = 'info' | 'diplo' | 'bamboo' | 'goals' | 'log';
 
@@ -27,6 +28,7 @@ export type Modal =
   | { kind: 'season'; events: GameEvent[]; turn: number }
   | { kind: 'battle'; report: BattleReport }
   | { kind: 'ending' }
+  | { kind: 'account' }
   | { kind: 'confirm'; title: string; body: string; confirmLabel: string; danger?: boolean; action: Action };
 
 export const ME: FactionId = 'p1';
@@ -79,6 +81,7 @@ export interface Store {
   hydrate: () => Promise<void>;
 
   goOnline: (seed?: number) => Promise<void>;
+  resumeOnline: (gameId: string) => Promise<void>;
   goOffline: () => void;
   refresh: () => Promise<void>;
   applyServer: (version: number, view: GameState, events: GameEvent[]) => void;
@@ -163,10 +166,13 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   async hydrate() {
+    // มี Supabase session ไว้ก่อนเสมอ (anonymous ถ้ายังไม่เคยผูกบัญชี) เพื่อให้ยังเล่น local ต่อได้ถ้าออนไลน์ไม่สำเร็จ
+    await ensureSession().catch(() => undefined);
+
     const session = loadSession();
     if (session) {
       try {
-        const snapshot = await fetchGame(session.gameId, session.token);
+        const snapshot = await fetchGame(session.gameId);
         set({
           mode: 'server',
           session,
@@ -191,10 +197,9 @@ export const useStore = create<Store>((set, get) => ({
     get().socket?.close();
     set({ connection: 'connecting', socket: null });
     try {
-      const created = await createServerGame({ seed, players: [{ name: MY_NAME }] });
-      const me = created.players[0];
-      if (!me) throw new ApiError(500, 'INTERNAL', 'server ไม่ได้ส่งที่นั่งผู้เล่นกลับมา');
-      const session: OnlineSession = { gameId: created.gameId, factionId: me.factionId, token: me.token };
+      await ensureSession();
+      const created = await createServerGame({ seed, name: MY_NAME });
+      const session: OnlineSession = { gameId: created.gameId, factionId: created.factionId };
       saveSession(session);
       void clearSave();
       set({
@@ -218,6 +223,34 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
+  async resumeOnline(gameId) {
+    get().socket?.close();
+    set({ connection: 'connecting', socket: null });
+    try {
+      await ensureSession();
+      const snapshot = await fetchGame(gameId);
+      const session: OnlineSession = { gameId, factionId: snapshot.factionId };
+      saveSession(session);
+      void clearSave();
+      set({
+        mode: 'server',
+        session,
+        state: snapshot.view,
+        version: snapshot.version,
+        sel: null,
+        tab: 'info',
+        modals: [],
+        toast: null,
+        loaded: true,
+        inFlight: 0,
+      });
+      get().openSocket();
+    } catch (err) {
+      set({ connection: 'offline' });
+      get().showToast(err instanceof ApiError ? err.message : 'เข้าเกมนี้ไม่สำเร็จ');
+    }
+  },
+
   goOffline() {
     get().socket?.close();
     clearSession();
@@ -233,7 +266,7 @@ export const useStore = create<Store>((set, get) => ({
   async refresh() {
     const { session } = get();
     if (!session) return;
-    const snapshot = await fetchGame(session.gameId, session.token);
+    const snapshot = await fetchGame(session.gameId);
     set({ state: snapshot.view, version: snapshot.version });
   },
 
@@ -249,7 +282,7 @@ export const useStore = create<Store>((set, get) => ({
       set({ socket: null, connection: 'offline' });
       return;
     }
-    const socket = connectGameSocket(session.gameId, session.token, {
+    const socket = connectGameSocket(session.gameId, {
       onStatus: (connection) => set({ connection }),
       onFrame: (frame) => {
         if (frame.type === 'sync') {
@@ -316,7 +349,6 @@ function dispatchOnline(set: Set, get: Get, action: Action): boolean {
     try {
       const outcome = await sendAction({
         gameId: session.gameId,
-        token: session.token,
         action,
         expectedVersion: version,
         idempotencyKey: newIdempotencyKey(),

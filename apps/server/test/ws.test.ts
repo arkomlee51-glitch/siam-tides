@@ -50,23 +50,22 @@ async function waitFor<T>(get: () => T | undefined, label: string, timeoutMs = 2
 describe('GET /games/:id/ws', () => {
   it('ปฏิเสธการต่อที่ไม่มี token', async () => {
     app = await makeApp();
-    const game = await startGame(app);
+    const game = await startGame(app, 'user-1');
     const { frames } = await connect(app, `/games/${game.gameId}/ws`);
     const frame = await waitFor(() => frames.find((f) => f.type === 'error'), 'error frame');
     expect(frame.error).toBe('UNAUTHORIZED');
   });
 
-  it('ส่ง sync ตอนต่อ แล้ว push update เมื่อมีคำสั่งของผู้เล่นอื่น', async () => {
+  it('ส่ง sync ตอนต่อ แล้ว push update เมื่อมีคำสั่งถูกใช้', async () => {
     app = await makeApp();
-    const game = await startGame(app, { seed: 99, players: [{}, {}] });
-    const [p1, p2] = game.players;
-    const { frames } = await connect(app, `/games/${game.gameId}/ws?token=${encodeURIComponent(p1!.token)}`);
+    const game = await startGame(app, 'user-1', { seed: 99 });
+    const { frames } = await connect(app, `/games/${game.gameId}/ws?token=user-1`);
 
     const sync = await waitFor(() => frames.find((f) => f.type === 'sync'), 'sync frame');
     expect(sync).toMatchObject({ version: 0, factionId: 'p1' });
 
-    const army = armyOf(game.view, 'p2');
-    const res = await submit(app, game, p2!.token, {
+    const army = armyOf(game.view, 'p1');
+    const res = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('ws'),
@@ -75,8 +74,6 @@ describe('GET /games/:id/ws', () => {
 
     const update = await waitFor(() => frames.find((f) => f.type === 'update'), 'update frame');
     expect(update).toMatchObject({ version: 1, seq: 1, factionId: 'p1' });
-    // event ส่วนตัวของ p2 ต้องไม่หลุดมาถึง p1
-    expect(update.events).toEqual([]);
     const view = update.view as { rng: number; armies: { id: string; mp: number }[] };
     expect(view.rng).toBe(0);
     expect(view.armies.find((a) => a.id === army.id)?.mp).toBe(0);
@@ -84,19 +81,15 @@ describe('GET /games/:id/ws', () => {
 
   it('ตอบ pong ให้ ping และ resync ให้สถานะล่าสุด', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
-    const { socket, frames } = await connect(
-      app,
-      `/games/${game.gameId}/ws?token=${encodeURIComponent(token)}`,
-    );
+    const game = await startGame(app, 'user-1');
+    const { socket, frames } = await connect(app, `/games/${game.gameId}/ws?token=user-1`);
     await waitFor(() => frames.find((f) => f.type === 'sync'), 'sync frame');
 
     socket.send(JSON.stringify({ type: 'ping' }));
     await waitFor(() => frames.find((f) => f.type === 'pong'), 'pong frame');
 
     const army = armyOf(game.view, 'p1');
-    await submit(app, game, token, {
+    await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('resync'),

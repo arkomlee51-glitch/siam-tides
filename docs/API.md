@@ -1,4 +1,4 @@
-# API (เฟส 3)
+# API (เฟส 4)
 
 Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได้ที่ `VITE_API_URL` ฝั่ง web)
 
@@ -13,16 +13,20 @@ Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได�
 
 ## Authentication
 
-เฟส 3 ยังไม่มีบัญชีผู้ใช้ `POST /games` จะออก **player token** ให้ทีละที่นั่ง (ดู
-[ADR-0003](adr/0003-player-token-and-optimistic-updates.md)) ส่ง token มากับคำขอได้สามทาง
+เฟส 4 เปลี่ยนจาก player token ชั่วคราว (ADR-0003) มาเป็น **Supabase JWT** ทุก request (ดู
+[ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)) ฝั่ง client เข้าเกมได้ทันทีแบบ anonymous
+sign-in (ไม่ต้องสมัครสมาชิกก่อน) แล้วค่อยผูกอีเมลทีหลังก็ได้ — ส่ง access token มากับคำขอได้สามทาง
+(รูปแบบเดิมจากเฟส 3 ทุกประการ endpoint และ error ไม่เปลี่ยน)
 
 | ที่    | ตัวอย่าง                                                               |
 | ------ | ---------------------------------------------------------------------- |
-| header | `Authorization: Bearer <token>`                                        |
-| header | `x-player-token: <token>`                                              |
-| query  | `?token=<token>` (ใช้กับ WebSocket เพราะเบราว์เซอร์ตั้ง header ไม่ได้) |
+| header | `Authorization: Bearer <access_token>`                                 |
+| header | `x-player-token: <access_token>`                                       |
+| query  | `?token=<access_token>` (ใช้กับ WebSocket เพราะเบราว์เซอร์ตั้ง header ไม่ได้) |
 
-เฟส 4 จะเปลี่ยนเป็น Supabase JWT โดย endpoint และ error ยังเหมือนเดิม
+server ตรวจ JWT ด้วย JWKS ของ `SUPABASE_URL` เป็นค่าเริ่มต้น (asymmetric, ไม่ต้องมี secret ฝั่ง server)
+หรือ `SUPABASE_JWT_SECRET` (HS256) สำหรับโปรเจกต์เก่า — ปฏิเสธด้วย `401 UNAUTHORIZED` ถ้า token หมดอายุ/
+เซ็นผิด/ไม่มี `sub` claim
 
 ## Endpoints
 
@@ -38,13 +42,13 @@ ping store จริง คืน `503 { "error": "STORE_UNAVAILABLE" }` ถ้�
 
 ### `POST /games`
 
+ต้องมี `Authorization` (Supabase JWT) มาด้วยเสมอ ผู้สร้าง (จาก `sub` ของ JWT) ได้ที่นั่งมนุษย์เดียวคือ `p1`
+ที่นั่งที่เหลือเป็น AI ทั้งหมด — เชิญคนอื่นมาเล่นที่นั่งเดียวกันยกไปเฟส 5 (ห้องรอ/รหัสเชิญ)
+
 ```jsonc
 // request — ทุกฟิลด์ไม่บังคับ
-{ "seed": 12345, "maxTurn": 30, "players": [{ "name": "อาณาจักรนที" }, { "name": "สหายเหนือ" }] }
+{ "seed": 12345, "maxTurn": 30, "name": "อาณาจักรนที" }
 ```
-
-`players` ได้ 1–4 คน รับที่นั่งตามลำดับ `center, north, east, south` ที่นั่งที่เหลือเป็น AI
-faction id คือ `p1..p4`
 
 ```jsonc
 // 201
@@ -52,12 +56,12 @@ faction id คือ `p1..p4`
   "gameId": "uuid",
   "version": 0,
   "seq": 0,
-  "players": [{ "factionId": "p1", "seat": "center", "name": "อาณาจักรนที", "token": "…" }],
+  "factionId": "p1",
   "view": { "schemaVersion": 1, "turn": 1, "…": "GameState ที่ p1 เห็นได้" },
 }
 ```
 
-token แสดงครั้งเดียวตอนนี้ server เก็บแต่ sha256
+เกมถูกเขียนลง Supabase (`games` + `game_players`) ก่อนเสมอ ถึงจะถือว่าสร้างสำเร็จ (ดู ADR-0004)
 
 ### `GET /games/:id`
 
@@ -152,9 +156,10 @@ rl:{key}             ตัวนับ rate limit — TTL RATE_LIMIT_WINDOW_SEC
 ## ตัวอย่างด้วย curl
 
 ```bash
-GAME=$(curl -s -X POST localhost:8787/games -H 'content-type: application/json' -d '{"seed":42}')
+# TOKEN = Supabase access token (เช่น สมัคร anonymous ผ่าน Supabase client แล้วอ่าน session.access_token)
+GAME=$(curl -s -X POST localhost:8787/games \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"seed":42}')
 ID=$(echo "$GAME" | node -p 'JSON.parse(require("fs").readFileSync(0)).gameId')
-TOKEN=$(echo "$GAME" | node -p 'JSON.parse(require("fs").readFileSync(0)).players[0].token')
 ARMY=$(echo "$GAME" | node -p 'JSON.parse(require("fs").readFileSync(0)).view.armies.find(a=>a.owner==="p1").id')
 
 curl -s -X POST "localhost:8787/games/$ID/actions" \

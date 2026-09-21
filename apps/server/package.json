@@ -14,9 +14,11 @@
     "@fastify/cors": "^11.3.0",
     "@fastify/websocket": "^11.3.0",
     "@siam/engine": "*",
+    "@supabase/supabase-js": "^2.116.0",
     "fastify": "^5.12.5",
     "fastify-type-provider-zod": "^7.0.0",
     "ioredis": "^6.0.0",
+    "jose": "^6.2.12",
     "zod": "^4.6.5"
   },
   "devDependencies": {

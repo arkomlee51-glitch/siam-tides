@@ -40,12 +40,8 @@ export type _ActionSchemaMatchesEngine = Assert<Equals<z.infer<typeof ActionSche
 export const CreateGameBody = z.object({
   seed: z.coerce.number().int().min(0).max(0xffffffff).optional(),
   maxTurn: z.coerce.number().int().min(1).max(120).optional(),
-  /** 1–4 ผู้เล่นมนุษย์ ได้ที่นั่งตามลำดับ center, north, east, south */
-  players: z
-    .array(z.object({ name: z.string().trim().min(1).max(40).optional() }))
-    .min(1)
-    .max(4)
-    .optional(),
+  /** ชื่ออาณาจักรของผู้สร้าง (ที่นั่ง p1) — ที่นั่งอื่นเป็น AI จนกว่าจะมีห้องรอ/รหัสเชิญในเฟส 5 */
+  name: z.string().trim().min(1).max(40).optional(),
 });
 export type CreateGameInput = z.infer<typeof CreateGameBody>;
 

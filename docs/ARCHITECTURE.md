@@ -29,48 +29,59 @@
 - `routes/games.ts` — REST, `routes/ws.ts` — WebSocket, `schemas.ts` — zod (มี type check ว่าตรงกับ `Action`)
 - `errors.ts` — `AppError` และ error body รูปแบบเดียว `{ error, message, details? }`
 
-## ลำดับการประมวลผลคำสั่ง (เฟส 3 — ทำแล้ว)
+## ลำดับการประมวลผลคำสั่ง (เฟส 4 — ทำแล้ว)
 
 ```
 client ──POST /games/:id/actions { action, expectedVersion, idempotencyKey }──▶ server
-server: ตรวจ player token (เฟส 4 = Supabase JWT) → rate limit
+server: ตรวจ Supabase JWT (JWKS หรือ HS256 secret, ดู ADR-0004) → rate limit
         → acquire lock game:{id}:lock (SET NX PX, ปล่อยด้วย compare-and-del)
         → idem:{id}:{key} มีอยู่แล้ว = คืนผลเดิมทันที
-        → load state (Redis; เฟส 4 ถ้าไม่มีจะโหลดจาก Postgres snapshot + replay)
+        → load state: Redis ก่อน ถ้าไม่มี (TTL หมดอายุ/instance ใหม่) โหลดจาก Supabase
+          snapshot ล่าสุด + replay game_actions ที่เหลือผ่าน applyAction เดิม แล้วอุ่น Redis กลับ
         → version ตรงไหม? ไม่ตรง = 409 พร้อม view ล่าสุด
-        → applyAction → ok? เขียน Redis (version+1) + จำผลไว้ที่ idem key
-          (เฟส 4 เพิ่ม insert game_actions + snapshot ถ้าขึ้นฤดูใหม่)
+        → applyAction → ok? insert game_actions (Supabase, รอผลจริงก่อนถือว่าคำสั่งสำเร็จ)
+          → เขียน Redis (version+1) + จำผลไว้ที่ idem key
+          → ขึ้นฤดูใหม่ = insert game_snapshots (fire-and-forget); เกมจบ = update games.status (fire-and-forget)
         → publish game:{id}:events → ทุก instance ส่ง viewFor ให้ผู้เล่นของตัวเองผ่าน WebSocket
         → release lock
 ```
 
 รายละเอียด endpoint, เฟรม WebSocket และ error code อยู่ใน [API.md](API.md)
-ส่วนเหตุผลของ player token และ optimistic update อยู่ใน [ADR-0003](adr/0003-player-token-and-optimistic-updates.md)
+ส่วนเหตุผลของ player token (เฟส 3) และ Supabase JWT + event sourcing (เฟส 4 ที่ใช้อยู่ตอนนี้) อยู่ใน
+[ADR-0003](adr/0003-player-token-and-optimistic-updates.md) และ
+[ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)
 
 ## หน้าที่ของ Supabase และ Redis
 
-| เรื่อง                | Supabase                 | Redis                              |
-| --------------------- | ------------------------ | ---------------------------------- |
-| ผู้ใช้/สิทธิ์         | Auth, JWT, RLS           | —                                  |
-| state เกมที่กำลังเล่น | snapshot ต้นฤดู          | state ล่าสุด (TTL หลังไม่มีคนเล่น) |
-| ประวัติคำสั่ง         | `game_actions` (ถาวร)    | —                                  |
-| กันชนกัน              | —                        | lock ต่อเกม, idempotency key       |
-| realtime              | —                        | pub/sub ข้าม instance              |
-| ห้องรอ/รหัสเชิญ       | `games.status = 'lobby'` | รหัสเชิญ (TTL)                     |
-| rate limit            | —                        | counter ต่อผู้ใช้                  |
+| เรื่อง                | Supabase                              | Redis                              |
+| ---------------------- | -------------------------------------- | ------------------------------------ |
+| ผู้ใช้/สิทธิ์          | Auth (anonymous + email), JWT, RLS    | —                                   |
+| state เกมที่กำลังเล่น | snapshot ต้นฤดู                        | state ล่าสุด (TTL หลังไม่มีคนเล่น) |
+| ประวัติคำสั่ง          | `game_actions` (ถาวร)                  | —                                   |
+| cold-start recovery    | snapshot ล่าสุด + replay action ที่เหลือ | —                                 |
+| กันชนกัน               | —                                      | lock ต่อเกม, idempotency key        |
+| realtime                | —                                      | pub/sub ข้าม instance               |
+| ห้องรอ/รหัสเชิญ        | `games.status = 'lobby'` (เฟส 5)      | รหัสเชิญ (TTL, เฟส 5)               |
+| rate limit              | —                                      | counter ต่อผู้ใช้                   |
 
-## Data model (ร่าง เฟส 4)
+## Data model (เฟส 4 — ตามที่สร้างจริงใน `supabase/migrations/20260918000000_init_schema.sql`)
 
 ```sql
 profiles        (id uuid pk references auth.users, display_name text, created_at timestamptz)
+                 -- สร้างอัตโนมัติด้วย trigger handle_new_user() ตอน auth.users insert ใหม่
 games           (id uuid pk, status text check (status in ('lobby','active','finished')),
                  seed bigint, engine_version text, max_turn int, created_by uuid, created_at, finished_at)
-game_players    (game_id uuid, user_id uuid, faction_id text, seat text, ending text, joined_at,
-                 primary key (game_id, user_id))
-game_snapshots  (game_id uuid, turn int, version int, state jsonb, created_at, primary key (game_id, turn))
-game_actions    (id bigserial pk, game_id uuid, seq int, user_id uuid, faction_id text,
+game_players    (game_id uuid, user_id uuid null, faction_id text, seat text, name text, ending text, joined_at,
+                 primary key (game_id, faction_id),
+                 unique index (game_id, user_id) where user_id is not null)
+game_snapshots  (game_id uuid, turn int, version int, state jsonb, primary key (game_id, turn))
+game_actions    (id bigint identity pk, game_id uuid, seq int, user_id uuid, faction_id text,
                  turn int, action jsonb, created_at, unique (game_id, seq))
 ```
+
+RLS เปิดทุกตาราง มีเฉพาะ policy อ่าน (`*_select_participant`, ผ่าน security-definer function
+`is_game_participant`) — เขียนได้เฉพาะ service-role key ของ server เท่านั้น (bypass RLS โดยตรง จึงไม่มี
+write policy เลย) รายละเอียดและเหตุผลอยู่ใน [ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)
 
 ## Redis keys (เฟส 3 — ใช้อยู่)
 

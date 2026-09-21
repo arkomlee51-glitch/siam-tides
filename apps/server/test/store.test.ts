@@ -29,7 +29,7 @@ const record = (): GameRecord => {
     id: randomUUID(),
     version: 0,
     seq: 0,
-    seats: [{ factionId: 'p1', seat: 'center', name: 'อาณาจักรนที', tokenHash: 'hash' }],
+    seats: [{ factionId: 'p1', seat: 'center', name: 'อาณาจักรนที', userId: 'user-1' }],
     state: createGame({ seed: 4, humans: [{ id: 'p1' }] }),
     createdAt: now,
     updatedAt: now,

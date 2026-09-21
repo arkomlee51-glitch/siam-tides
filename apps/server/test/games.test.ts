@@ -10,29 +10,41 @@ afterEach(async () => {
 });
 
 describe('POST /games', () => {
-  it('สร้างเกมและออก token ให้ผู้เล่นทุกที่นั่ง', async () => {
+  it('ต้องมี token ถึงจะสร้างเกมได้', async () => {
     app = await makeApp();
-    const game = await startGame(app, { seed: 7, players: [{ name: 'อาณาจักรนที' }, { name: 'สหายเหนือ' }] });
-
-    expect(game.version).toBe(0);
-    expect(game.players.map((p) => p.factionId)).toEqual(['p1', 'p2']);
-    expect(game.players.map((p) => p.seat)).toEqual(['center', 'north']);
-    expect(new Set(game.players.map((p) => p.token)).size).toBe(2);
-    expect(game.view.factions.p1?.name).toBe('อาณาจักรนที');
-    expect(game.view.factions.p2?.kind).toBe('human');
+    const res = await app.inject({ method: 'POST', url: '/games', payload: {} });
+    expect(res.statusCode).toBe(401);
   });
 
-  it('ส่ง view ที่ซ่อน rng และคลังของผู้เล่นอื่น', async () => {
+  it('สร้างเกม — ผู้สร้างได้ที่นั่ง p1 ที่เหลือเป็น AI', async () => {
     app = await makeApp();
-    const game = await startGame(app, { seed: 7, players: [{}, {}] });
+    const game = await startGame(app, 'user-1', { seed: 7, name: 'อาณาจักรนที' });
+
+    expect(game.version).toBe(0);
+    expect(game.seq).toBe(0);
+    expect(game.factionId).toBe('p1');
+    expect(game.view.factions.p1?.name).toBe('อาณาจักรนที');
+    expect(game.view.factions.p1?.kind).toBe('human');
+    expect(game.view.factions.north?.kind).toBe('ai');
+  });
+
+  it('ส่ง view ที่ซ่อน rng ไว้เสมอ (คลังของ AI ยังเห็นได้ตามปกติ เห็นเฉพาะของผู้เล่นมนุษย์คนอื่นที่ถูกซ่อน)', async () => {
+    app = await makeApp();
+    const game = await startGame(app, 'user-1', { seed: 7 });
     expect(game.view.rng).toBe(0);
-    expect(game.view.factions.p2?.res).toEqual({ rice: 0, man: 0, wealth: 0, faith: 0, know: 0 });
     expect(game.view.factions.p1?.res.rice).toBeGreaterThan(0);
+    expect(game.view.factions.north?.kind).toBe('ai');
+    expect(game.view.factions.north?.res.rice).toBeGreaterThanOrEqual(0);
   });
 
   it('ปฏิเสธ body ที่ไม่ถูกต้องด้วย 400 รูปแบบเดียวกัน', async () => {
     app = await makeApp();
-    const res = await app.inject({ method: 'POST', url: '/games', payload: { players: [] } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/games',
+      headers: { authorization: 'Bearer user-1' },
+      payload: { seed: -1 },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json()).toMatchObject({ error: 'BAD_REQUEST' });
     expect(typeof res.json().message).toBe('string');
@@ -40,9 +52,10 @@ describe('POST /games', () => {
 
   it('ปฏิเสธเมื่อเกินโควตา rate limit', async () => {
     app = await makeApp({ rateLimitMax: 2 });
-    expect((await app.inject({ method: 'POST', url: '/games', payload: {} })).statusCode).toBe(201);
-    expect((await app.inject({ method: 'POST', url: '/games', payload: {} })).statusCode).toBe(201);
-    const third = await app.inject({ method: 'POST', url: '/games', payload: {} });
+    const headers = { authorization: 'Bearer user-1' };
+    expect((await app.inject({ method: 'POST', url: '/games', headers, payload: {} })).statusCode).toBe(201);
+    expect((await app.inject({ method: 'POST', url: '/games', headers, payload: {} })).statusCode).toBe(201);
+    const third = await app.inject({ method: 'POST', url: '/games', headers, payload: {} });
     expect(third.statusCode).toBe(429);
     expect(third.json()).toMatchObject({ error: 'RATE_LIMITED' });
   });
@@ -51,26 +64,16 @@ describe('POST /games', () => {
 describe('GET /games/:id', () => {
   it('ต้องมี token และ token ต้องเป็นของเกมนี้', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const other = await startGame(app);
+    const game = await startGame(app, 'user-1');
+    await startGame(app, 'user-2');
     const url = `/games/${game.gameId}`;
 
     expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
     expect(
-      (
-        await app.inject({
-          method: 'GET',
-          url,
-          headers: { authorization: `Bearer ${other.players[0]!.token}` },
-        })
-      ).statusCode,
+      (await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer user-2' } })).statusCode,
     ).toBe(403);
 
-    const ok = await app.inject({
-      method: 'GET',
-      url,
-      headers: { 'x-player-token': game.players[0]!.token },
-    });
+    const ok = await app.inject({ method: 'GET', url, headers: { 'x-player-token': 'user-1' } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json()).toMatchObject({ gameId: game.gameId, version: 0, factionId: 'p1' });
   });
@@ -90,11 +93,10 @@ describe('GET /games/:id', () => {
 describe('POST /games/:id/actions', () => {
   it('ใช้คำสั่งแล้ว version เพิ่มขึ้นทีละหนึ่งและส่ง event ที่ผู้เล่นเห็นได้', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
 
-    const res = await submit(app, game, token, {
+    const res = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('camp'),
@@ -110,12 +112,11 @@ describe('POST /games/:id/actions', () => {
 
   it('เดินทัพไปช่องที่ไปถึงได้', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
     const dest = [...reachableTiles(game.view, army).values()][0]!;
 
-    const res = await submit(app, game, token, {
+    const res = await submit(app, game, 'user-1', {
       action: { type: 'move', armyId: army.id, c: dest.c, r: dest.r },
       expectedVersion: 0,
       idempotencyKey: idemKey('move'),
@@ -127,16 +128,15 @@ describe('POST /games/:id/actions', () => {
 
   it('ปฏิเสธคำสั่งที่ expectedVersion ล้าสมัยด้วย 409 พร้อม view ล่าสุด', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
 
-    await submit(app, game, token, {
+    await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('first'),
     });
-    const stale = await submit(app, game, token, {
+    const stale = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('stale'),
@@ -151,8 +151,7 @@ describe('POST /games/:id/actions', () => {
 
   it('ส่ง idempotencyKey ซ้ำได้ผลลัพธ์เดิมและไม่ใช้คำสั่งสองครั้ง', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
     const payload = {
       action: { type: 'camp', armyId: army.id },
@@ -160,8 +159,8 @@ describe('POST /games/:id/actions', () => {
       idempotencyKey: idemKey('once'),
     };
 
-    const first = await submit(app, game, token, payload);
-    const again = await submit(app, game, token, payload);
+    const first = await submit(app, game, 'user-1', payload);
+    const again = await submit(app, game, 'user-1', payload);
 
     expect(first.statusCode).toBe(200);
     expect(again.statusCode).toBe(200);
@@ -172,17 +171,16 @@ describe('POST /games/:id/actions', () => {
     const snapshot = await app.inject({
       method: 'GET',
       url: `/games/${game.gameId}`,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: 'Bearer user-1' },
     });
     expect(snapshot.json().version).toBe(1);
   });
 
   it('คำสั่งที่ engine ปฏิเสธคืน 422 พร้อม error code ของ engine', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
 
-    const res = await submit(app, game, token, {
+    const res = await submit(app, game, 'user-1', {
       action: { type: 'move', armyId: 'a999', c: 1, r: 1 },
       expectedVersion: 0,
       idempotencyKey: idemKey('bad'),
@@ -193,15 +191,15 @@ describe('POST /games/:id/actions', () => {
     const snapshot = await app.inject({
       method: 'GET',
       url: `/games/${game.gameId}`,
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: 'Bearer user-1' },
     });
     expect(snapshot.json().version).toBe(0);
   });
 
   it('ปฏิเสธ action ที่ไม่รู้จักตั้งแต่ชั้น schema', async () => {
     app = await makeApp();
-    const game = await startGame(app);
-    const res = await submit(app, game, game.players[0]!.token, {
+    const game = await startGame(app, 'user-1');
+    const res = await submit(app, game, 'user-1', {
       action: { type: 'nuke' },
       expectedVersion: 0,
       idempotencyKey: idemKey('schema'),
@@ -212,15 +210,14 @@ describe('POST /games/:id/actions', () => {
 
   it('จำกัดจำนวนคำสั่งต่อผู้เล่นต่อเกม', async () => {
     app = await makeApp({ rateLimitMax: 1 });
-    const game = await startGame(app);
-    const token = game.players[0]!.token;
+    const game = await startGame(app, 'user-1');
     const army = armyOf(game.view, 'p1');
-    const first = await submit(app, game, token, {
+    const first = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 0,
       idempotencyKey: idemKey('rl'),
     });
-    const second = await submit(app, game, token, {
+    const second = await submit(app, game, 'user-1', {
       action: { type: 'camp', armyId: army.id },
       expectedVersion: 1,
       idempotencyKey: idemKey('rl'),

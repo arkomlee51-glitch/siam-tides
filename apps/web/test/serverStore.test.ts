@@ -1,10 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyAction, armiesOf, createGame, viewFor } from '@siam/engine';
 import type { Action, GameState } from '@siam/engine';
-import { ME, useStore } from '../src/store';
+
+/**
+ * เฟส 4: token ต่อที่นั่งแบบเฟส 3 หายไปแล้ว — client คุยกับ server ด้วย Supabase access token
+ * (ดึงผ่าน ensureSession/getAccessToken ใน src/api/supabase.ts) เทสต์นี้จึง mock โมดูลนั้นทั้งก้อน
+ * เพื่อไม่ให้ store/client ไปยิง network จริงตอนเรียก ensureSession()/getAccessToken()
+ */
+vi.mock('../src/api/supabase', () => ({
+  ensureSession: vi.fn().mockResolvedValue({ access_token: 'test-access-token' }),
+  getAccessToken: vi.fn().mockResolvedValue('test-access-token'),
+  currentUser: vi.fn().mockResolvedValue(null),
+  linkEmail: vi.fn(),
+  signOut: vi.fn(),
+  supabase: {},
+}));
+
+const { ME, useStore } = await import('../src/store');
 
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
-const TOKEN = 'player-token';
 
 interface FakeServer {
   state: GameState;
@@ -28,11 +42,12 @@ function install(): void {
       server.calls.push({ url, body });
 
       if (url.endsWith('/games') && init?.method === 'POST') {
+        // เฟส 4: POST /games คืน Snapshot ตรง ๆ — ไม่มี players/token ต่อที่นั่งแบบเฟส 3 อีกแล้ว
         return respond(201, {
           gameId: GAME_ID,
           version: 0,
           seq: 0,
-          players: [{ factionId: ME, seat: 'center', name: 'อาณาจักรนที', token: TOKEN }],
+          factionId: ME,
           view: viewFor(server.state, ME),
         });
       }
@@ -94,7 +109,7 @@ describe('store โหมด server', () => {
   it('goOnline สร้างเกมบน server แล้วใช้ view จาก server', () => {
     const s = useStore.getState();
     expect(s.mode).toBe('server');
-    expect(s.session).toMatchObject({ gameId: GAME_ID, factionId: ME, token: TOKEN });
+    expect(s.session).toMatchObject({ gameId: GAME_ID, factionId: ME });
     expect(s.version).toBe(0);
     expect(s.state.rng).toBe(0);
     expect(s.state.turn).toBe(1);

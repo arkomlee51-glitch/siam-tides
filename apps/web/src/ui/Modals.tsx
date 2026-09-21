@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { ENDINGS, SEASONS, describeDecision, seasonLabel, seasonOf, yearOf } from '@siam/engine';
 import type { GameEvent } from '@siam/engine';
 import { ME, useStore } from '../store';
+import { AccountPanel } from './Account';
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -189,6 +190,13 @@ export function Modals() {
             ยกเลิก
           </button>
         </div>
+      </Shell>
+    );
+
+  if (modal.kind === 'account')
+    return (
+      <Shell onClose={closeModal}>
+        <AccountPanel onClose={closeModal} />
       </Shell>
     );
 
