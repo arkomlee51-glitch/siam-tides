@@ -92,6 +92,28 @@ connection คนละตัว ต้องได้ state ล่าสุด�
 ไม่มี Docker, ไม่มีสิทธิ์ root ให้ติดตั้ง redis-server, และ `npm install redis-memory-server` ดาวน์โหลด
 binary ไม่สำเร็จ (network allowlist ของเครื่องนี้)
 
+## Addendum 2 (รอบต่อมาในวันเดียวกัน): ทำไมไม่เขียน fake Redis server เอง
+
+พิจารณาแล้วว่าจะเขียน TCP server เล็ก ๆ พูด RESP protocol เองใน Node.js (ไม่ต้องมี root/Docker) เพื่อให้
+`ioredis` จริงต่อเข้าไปได้ แล้วรัน `redis-game.test.ts` ผ่านมันแทน Redis จริง — อ่าน `store/redis.ts` ครบแล้ว
+เพื่อดูว่าต้องรองรับคำสั่งอะไรบ้าง (`GET`/`SET EX`/`SET PX NX`/`EXPIRE`/`DEL`/`EVAL` ของสคริปต์ปลดล็อกแบบ
+compare-and-delete/`MULTI-INCR-EXPIRE NX-TTL-EXEC`/`PUBLISH`-`SUBSCRIBE`/`PING`) แต่ตัดสินใจ **ไม่ทำ**
+ด้วยเหตุผล:
+
+- จุดที่เทสต์นี้มีไว้พิสูจน์คือ atomicity ข้าม process จริงของ Redis (lock ปลดล็อกแบบ compare-and-delete
+  ผ่าน `EVAL`, และการ publish/subscribe ข้าม instance) — ของปลอมที่เขียนเองใน event loop เดียวจะ "ผ่าน" เทสต์
+  ได้ง่าย ๆ โดยไม่ได้พิสูจน์ atomicity อะไรเลย เพราะไม่มีการแข่งขัน (race) จริงให้ล้มเหลวถ้า implement ผิด
+- เทสต์ที่ "ผ่าน" แบบนี้จะดูน่าเชื่อถือกว่าความเป็นจริง — เสี่ยงทำให้ทีมในอนาคตเข้าใจผิดว่ายืนยันกับ Redis จริง
+  แล้ว ทั้งที่ยังไม่เคยเจอพฤติกรรมจริงของ Redis เลยสักครั้ง (เช่น connection drop, `EXPIRE` race, ปัญหาการ
+  serialize ของ `ioredis` เอง) ซึ่งขัดกับแนวทางที่ยึดมาตลอดเฟสนี้ว่า "ยอมรับว่ายังไม่ยืนยัน" ดีกว่า "ทำให้ดู
+  เหมือนยืนยันแล้วทั้งที่ไม่ใช่"
+- คุ้มค่าต่ำ: ต้องดูแลความถูกต้องของ RESP parser + Lua-script-เดียวนั้นเอง ซึ่งเป็นโค้ดที่ไม่มีใช้จริงใน
+  production เลย (มีไว้แค่หลอกเทสต์) แต่ต้องดูแลบั๊กของมันเองต่อไป
+
+สรุป: ช่องว่างนี้ปิดไม่ได้จริงในสภาพแวดล้อมที่พัฒนาฟีเจอร์นี้ทั้งหมด (ไม่มี Docker/root/เครือข่ายที่ดาวน์โหลด
+Redis binary ได้) — ต้องรันบนเครื่องของลีเองที่มี Docker: `TEST_REDIS=1 docker compose up -d && npm test -w
+@siam/server -- redis-game`
+
 ## Consequences
 
 - `tribute`/`festival`/`annex` ยังใช้ได้แค่กับ AI เหมือนเดิม — การทูตมนุษย์-มนุษย์รอบนี้มีแค่สงบศึก

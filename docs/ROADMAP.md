@@ -137,10 +137,6 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
 - [x] cold-start replay (Redis หมดอายุ/instance ใหม่) ยืนยันแล้วว่าใช้ได้กับเกมหลายคนจริง ไม่ใช่แค่คนเดียว
       — ทั้งสองผู้เล่นได้ view ของตัวเองถูกต้องหลัง store ร้อนลืมเกม แล้วยังเล่นต่อได้
       (`apps/server/test/multiplayer.test.ts`)
-- [~] Redis pub/sub ข้าม instance กับห้องรอ/เกมหลายคนจริง — เขียนเทสต์แล้ว (สร้างห้อง/join/start คนละ
-      instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
-      Redis (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` + `docker compose up -d`) ควรรันจริง
-      อย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่
 - [x] เชื่อมต่อใหม่กับเกมหลายคน (in-process, ไม่ต้องมี Redis จริง) — ทดสอบ 4 คนต่อ WS พร้อมกันจริง ๆ,
       คนหนึ่งปิดสาย (จำลองแอปถูกปิด/เน็ตหลุด) กลางฤดูขณะอีกสามคนเล่นต่อ (endTurn ไปสองคนแล้ว ฤดูยังไม่ข้าม
       เพราะคนที่หลุดยังไม่ ready), แล้วต่อ WS ใหม่ (connection คนละตัวจากเดิม) ต้องได้ `sync` ที่มี version/
@@ -152,7 +148,10 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
       instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
       Redis/Docker ให้ใช้เลย (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` +
       `docker compose up -d`) ควรรันจริงอย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่ — **นี่คือช่องว่างเดียวที่เหลือ
-      ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง)
+      ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง) —
+      ลองทางเลือกอื่น (เขียน fake Redis server เองแบบพูด RESP protocol) แล้วแต่ตัดสินใจไม่ทำ เพราะจะพิสูจน์
+      แค่ว่าโค้ดปลอมทำงานถูก ไม่ได้พิสูจน์ atomicity ข้าม process จริงของ Redis ที่เทสต์นี้มีไว้ยืนยัน — ดู
+      [ADR-0006 Addendum 2](adr/0006-human-diplomacy-and-season-timer.md#addendum-2-รอบต่อมาในวันเดียวกัน-ทำไมไม่เขียน-fake-redis-server-เอง)
 
 **เสร็จเมื่อ** 4 คนเล่นจนจบได้โดยไม่ desync และ reconnect กลางเกมได้ — เหลือจุดเดียว: ยืนยัน pub/sub ข้าม
 instance จริงกับ Redis จริง (ลีต้องรันเองด้วย Docker) ส่วนที่เหลือทั้งหมด (ห้องรอ, ฤดูพร้อมกัน, ตัวจับเวลา,
