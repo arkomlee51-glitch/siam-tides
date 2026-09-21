@@ -28,6 +28,8 @@ export interface LobbyView {
   seats: LobbySeatView[];
   /** ตั้งแล้ว = เกมเริ่มไปแล้ว — client ที่ poll เจอค่านี้ให้ไป GET /games/:id ด้วย token ตัวเอง */
   startedGameId: string | null;
+  /** undefined = ไม่จำกัดเวลาต่อฤดูเมื่อเกมเริ่ม */
+  seasonTimerSeconds: number | undefined;
 }
 
 const toView = (record: LobbyRecord): LobbyView => ({
@@ -37,6 +39,7 @@ const toView = (record: LobbyRecord): LobbyView => ({
   maxTurn: record.maxTurn,
   seats: record.seats,
   startedGameId: record.startedGameId,
+  seasonTimerSeconds: record.seasonTimerSeconds,
 });
 
 /**
@@ -55,6 +58,7 @@ export class LobbyService {
     hostName: string,
     seed: number | undefined,
     maxTurn: number | undefined,
+    seasonTimerSeconds: number | undefined,
   ): Promise<LobbyView> {
     let code = randomCode();
     // กันโค้ดชนกัน (โอกาสน้อยมากกับ 32^6 ตัวเลือก แต่กันไว้ไม่เสียหาย)
@@ -69,6 +73,7 @@ export class LobbyService {
       seats: [{ userId: hostUserId, name: hostName }],
       startedGameId: null,
       createdAt: new Date().toISOString(),
+      seasonTimerSeconds,
     };
     await this.store.putLobby(record);
     return toView(record);
@@ -120,7 +125,12 @@ export class LobbyService {
       if (!record) throw lobbyNotFound();
       if (record.startedGameId) throw lobbyStarted(record.startedGameId);
       if (record.hostUserId !== hostUserId) throw lobbyForbidden();
-      const created = await this.games.createFromLobby(record.seats, record.seed, record.maxTurn);
+      const created = await this.games.createFromLobby(
+        record.seats,
+        record.seed,
+        record.maxTurn,
+        record.seasonTimerSeconds,
+      );
       record.startedGameId = created.gameId;
       await this.store.putLobby(record);
       return created;

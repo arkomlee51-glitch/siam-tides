@@ -40,6 +40,7 @@ function eliminateHuman(ctx: Ctx, fid: FactionId): void {
   f.ending = 'ashes';
   ctx.s.armies = ctx.s.armies.filter((a) => a.owner !== fid);
   ctx.s.pending = ctx.s.pending.filter((p) => p.faction !== fid);
+  ctx.s.proposals = (ctx.s.proposals ?? []).filter((p) => p.from !== fid && p.to !== fid);
   ctx.s.ready = ctx.s.ready.filter((x) => x !== fid);
   emit(ctx, null, 'ending', 'bad', `🕯️ ${f.name}เสียเมืองหลวงและล่มสลาย`);
   chronicle(ctx.s, fid, `${f.name}ล่มสลาย`);

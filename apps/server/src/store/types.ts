@@ -18,6 +18,10 @@ export interface GameRecord {
   state: GameState;
   createdAt: string;
   updatedAt: string;
+  /** null = ไม่จำกัดเวลาต่อฤดู (ค่าเริ่มต้น) */
+  seasonTimerSeconds: number | null;
+  /** เวลา (ISO) ที่ฤดูนี้จะถูกบังคับจบถ้ายังมีมนุษย์ไม่ ready — null เมื่อไม่มี seasonTimerSeconds */
+  seasonDeadline: string | null;
 }
 
 /** สิ่งที่กระจายผ่าน pub/sub ให้ทุก instance ที่มีคนต่อ WebSocket อยู่ */
@@ -51,6 +55,8 @@ export interface LobbyRecord {
   /** ตั้งตอน start แล้ว — client ที่ poll เจอค่านี้ให้ไป GET /games/:id ต่อ (ห้องรอเองปล่อยให้หมดอายุไปเอง) */
   startedGameId: string | null;
   createdAt: string;
+  /** ส่งต่อให้เกมตอน start — undefined = ไม่จำกัดเวลาต่อฤดู */
+  seasonTimerSeconds: number | undefined;
 }
 
 export interface Store {

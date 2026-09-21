@@ -10,11 +10,85 @@ export function DiplomacyTab() {
   const diplo = seasonOf(state.turn).diplo;
   const alive = aiFactions(state);
   const dead = state.order.map((id) => state.factions[id]!).filter((f) => f.kind === 'ai' && !f.alive);
+  const otherHumans = state.order.map((id) => state.factions[id]!).filter((f) => f.kind === 'human' && f.id !== ME);
+  const aliveHumans = otherHumans.filter((f) => f.alive);
+  const deadHumans = otherHumans.filter((f) => !f.alive);
 
   const cost = (base: Parameters<typeof costText>[0]) => seasonalCostOf(state, base, 'diplo');
 
   return (
     <>
+      {aliveHumans.length > 0 && (
+        <>
+          <p className="muted small">ผู้เล่นคนอื่น — สงบศึกต้องให้อีกฝ่ายตอบรับเอง ไม่ใช่จ่ายเงินซื้อ</p>
+          {aliveHumans.map((f) => {
+            const rel = relation(state, f.id, ME);
+            const outgoing = state.proposals.find((p) => p.from === ME && p.to === f.id && p.kind === 'peace');
+            const incoming = state.proposals.find((p) => p.from === f.id && p.to === ME && p.kind === 'peace');
+            return (
+              <div className="card" key={f.id}>
+                <div className="ch">
+                  <span className="sw" style={{ background: `var(--own-${f.colorToken})` }} />
+                  <h3>{f.name}</h3>
+                  <span className={`badge ${rel.war ? 'bad' : 'ok'}`}>{rel.war ? 'สงคราม' : 'สงบ'}</span>
+                </div>
+                <div className="rel">
+                  <div className="track" title="ขีดจางคือระดับที่ผนวกได้">
+                    <i style={{ left: `${(rel.rel + 100) / 2}%` }} />
+                    <em style={{ left: `${(RULES.annexThreshold + 100) / 2}%` }} />
+                  </div>
+                  <span>{rel.rel}</span>
+                </div>
+                <div className="btns">
+                  {rel.war ? (
+                    incoming ? (
+                      <>
+                        <p className="muted small">{f.name}เสนอสงบศึกกับคุณ</p>
+                        <button
+                          className="btn good"
+                          onClick={() => dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: true })}
+                        >
+                          🕊️ ยอมรับ
+                        </button>
+                        <button
+                          className="btn"
+                          onClick={() => dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: false })}
+                        >
+                          ปฏิเสธ
+                        </button>
+                      </>
+                    ) : outgoing ? (
+                      <button className="btn" disabled>
+                        🕊️ เสนอสงบศึกแล้ว รอคำตอบจาก{f.name}
+                      </button>
+                    ) : (
+                      <button className="btn" onClick={() => dispatch({ type: 'proposePeace', target: f.id })}>
+                        🕊️ เสนอสงบศึก
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      className="btn danger"
+                      onClick={() =>
+                        pushModal({
+                          kind: 'confirm',
+                          title: `ประกาศสงครามกับ${f.name}?`,
+                          body: 'ความสัมพันธ์จะลดเหลือไม่เกิน −60 เสถียรภาพ −5 และแคว้นอื่นจะไม่พอใจ สงครามยังลดเสถียรภาพ 2 ทุกฤดูจนกว่าจะสงบศึก อีกฝ่ายต้องยอมรับข้อเสนอเองจึงจะสงบศึกได้',
+                          confirmLabel: 'ประกาศสงคราม',
+                          danger: true,
+                          action: { type: 'declareWar', target: f.id },
+                        })
+                      }
+                    >
+                      ⚔️ ประกาศสงคราม
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
       <p className="muted small">
         ค่าใช้จ่ายการทูตฤดูนี้ ×{diplo}
         {diplo < 1 ? ' ฤดูร้อนเหมาะกับการเจรจา' : ''}
@@ -108,6 +182,15 @@ export function DiplomacyTab() {
             <h3>{f.name}</h3>
           </div>
           <p className="muted small">ไม่เหลืออยู่ในฐานะรัฐอิสระแล้ว</p>
+        </div>
+      ))}
+      {deadHumans.map((f) => (
+        <div className="card dim" key={f.id}>
+          <div className="ch">
+            <span className="sw" style={{ background: `var(--own-${f.colorToken})` }} />
+            <h3>{f.name}</h3>
+          </div>
+          <p className="muted small">ล่มสลายไปแล้ว</p>
         </div>
       ))}
     </>

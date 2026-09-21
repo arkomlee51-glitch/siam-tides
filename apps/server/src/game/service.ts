@@ -13,6 +13,10 @@ export interface GameSnapshot {
   seq: number;
   factionId: string;
   view: GameState;
+  /** null = ไม่จำกัดเวลาต่อฤดู */
+  seasonTimerSeconds: number | null;
+  /** เวลา (ISO) ที่ฤดูนี้จะถูกบังคับจบถ้ายังมีมนุษย์ไม่ ready */
+  seasonDeadline: string | null;
 }
 
 /** เฟส 4: ผู้เล่นคือ Supabase user เดียว (ที่นั่งอื่นเป็น AI จนกว่าจะมีห้องรอ/รหัสเชิญในเฟส 5) */
@@ -46,7 +50,7 @@ export class GameService {
 
   async create(input: CreateGameInput, ownerUserId: string, ownerName: string | null): Promise<CreatedGame> {
     const displayName = input.name?.trim() || ownerName || 'ผู้เล่น';
-    return this.createWithHumans([{ userId: ownerUserId, name: displayName }], input.seed, input.maxTurn);
+    return this.createWithHumans([{ userId: ownerUserId, name: displayName }], input.seed, input.maxTurn, undefined);
   }
 
   /** เฟส 5: สร้างเกมจากห้องรอที่ครบที่นั่งแล้ว — เจ้าของห้อง (index 0) ได้ที่นั่ง p1 เสมอ ที่เหลือ p2..p4 ตามลำดับที่เข้าร่วม */
@@ -54,14 +58,16 @@ export class GameService {
     seats: { userId: string; name: string }[],
     seed: number | undefined,
     maxTurn: number | undefined,
+    seasonTimerSeconds: number | undefined,
   ): Promise<CreatedGame> {
-    return this.createWithHumans(seats, seed, maxTurn);
+    return this.createWithHumans(seats, seed, maxTurn, seasonTimerSeconds);
   }
 
   private async createWithHumans(
     humans: { userId: string; name: string }[],
     seed: number | undefined,
     maxTurn: number | undefined,
+    seasonTimerSeconds: number | undefined,
   ): Promise<CreatedGame> {
     const state = createGame({
       seed,
@@ -98,6 +104,9 @@ export class GameService {
     }
 
     const now = new Date().toISOString();
+    const seasonDeadline = seasonTimerSeconds
+      ? new Date(Date.now() + seasonTimerSeconds * 1000).toISOString()
+      : null;
     const record: GameRecord = {
       id: gameId,
       version: 0,
@@ -106,10 +115,20 @@ export class GameService {
       state,
       createdAt: now,
       updatedAt: now,
+      seasonTimerSeconds: seasonTimerSeconds ?? null,
+      seasonDeadline,
     };
     await this.store.putGame(record);
 
-    return { gameId: record.id, version: 0, seq: 0, factionId: owner.id, view: viewFor(state, owner.id) };
+    return {
+      gameId: record.id,
+      version: 0,
+      seq: 0,
+      factionId: owner.id,
+      view: viewFor(state, owner.id),
+      seasonTimerSeconds: record.seasonTimerSeconds,
+      seasonDeadline: record.seasonDeadline,
+    };
   }
 
   /** ตรวจ JWT แล้วหาที่นั่งของผู้ใช้คนนี้ในเกม (โยน 401/403/404 ถ้าไม่ผ่าน) */
@@ -119,8 +138,9 @@ export class GameService {
   ): Promise<{ record: GameRecord; factionId: string; userId: string }> {
     if (!token) throw unauthorized();
     const auth = await this.verifier.verify(token);
-    const record = await this.loadRecord(gameId);
+    let record = await this.loadRecord(gameId);
     if (!record) throw notFound();
+    record = await this.maybeExpireSeason(record);
     const seat = record.seats.find((s) => s.userId === auth.userId);
     if (!seat) throw forbidden();
     return { record, factionId: seat.factionId, userId: auth.userId };
@@ -143,12 +163,15 @@ export class GameService {
       seq: record.seq,
       factionId,
       view: viewFor(record.state, factionId),
+      seasonTimerSeconds: record.seasonTimerSeconds,
+      seasonDeadline: record.seasonDeadline,
     };
   }
 
   async view(gameId: string, factionId: string): Promise<GameSnapshot> {
-    const record = await this.loadRecord(gameId);
+    let record = await this.loadRecord(gameId);
     if (!record) throw notFound();
+    record = await this.maybeExpireSeason(record);
     return this.snapshot(record, factionId);
   }
 
@@ -161,8 +184,10 @@ export class GameService {
         throw new AppError(cached.status, cached.code, cached.message);
       }
 
-      const record = await this.loadRecord(gameId);
+      let record = await this.loadRecord(gameId);
       if (!record) throw notFound();
+      // per-game lock ถูกถืออยู่แล้ว (store.withLock ด้านบน) — เรียกตรง ๆ ได้โดยไม่ต้องล็อกซ้ำ
+      record = await this.expireSeasonIfDue(record);
       if (!record.seats.some((s) => s.factionId === factionId)) throw forbidden();
       if (record.version !== expectedVersion) {
         throw versionConflict({
@@ -285,8 +310,97 @@ export class GameService {
       state,
       createdAt: data.game.createdAt,
       updatedAt: new Date().toISOString(),
+      // หมายเหตุ: seasonTimerSeconds ยังไม่ถูกเก็บถาวรใน Supabase (มีแค่ใน Redis/memory record)
+      // cold-start replay จึงคืนมาแบบไม่มีตัวจับเวลาเสมอ — งดเวลาต่อฤดูมากกว่าค้างเวลาผิด ๆ
+      seasonTimerSeconds: null,
+      seasonDeadline: null,
     };
     await this.store.putGame(record);
     return record;
+  }
+
+  /** true = ตั้งเวลาไว้ และเวลาต่อฤดูปัจจุบันหมดแล้ว แต่ยังมีมนุษย์ไม่ ready */
+  private isSeasonTimerDue(record: GameRecord): boolean {
+    return (
+      !record.state.ended &&
+      record.seasonTimerSeconds !== null &&
+      record.seasonDeadline !== null &&
+      Date.parse(record.seasonDeadline) <= Date.now()
+    );
+  }
+
+  /** เรียกจากที่ที่ยังไม่ได้ถือ per-game lock (GET/ws sync) — ล็อกเองเฉพาะตอนที่ต้องแก้จริง ๆ */
+  private async maybeExpireSeason(record: GameRecord): Promise<GameRecord> {
+    if (!this.isSeasonTimerDue(record)) return record;
+    return this.store.withLock(record.id, async () => {
+      const fresh = (await this.loadRecord(record.id)) ?? record;
+      return this.expireSeasonIfDue(fresh);
+    });
+  }
+
+  /**
+   * บังคับ endTurn แทนมนุษย์ที่ยังไม่ ready เมื่อหมดเวลาต่อฤดู — ผ่าน applyAction ตัวเดียวกับคำสั่งปกติทุกประการ
+   * (บันทึก action log ก่อนเสมอ เพื่อให้ cold-start replay ย้อนสร้างผลลัพธ์เดียวกันได้) เรียกได้เฉพาะตอนถือ
+   * per-game lock อยู่แล้วเท่านั้น (submit() ถืออยู่แล้ว, maybeExpireSeason ล็อกให้ก่อนเรียก)
+   */
+  private async expireSeasonIfDue(record: GameRecord): Promise<GameRecord> {
+    if (!this.isSeasonTimerDue(record)) return record;
+    const seasonTimerSeconds = record.seasonTimerSeconds!;
+    let state = record.state;
+    let version = record.version;
+    let seq = record.seq;
+    const laggards = state.order.filter(
+      (id) => state.factions[id]!.kind === 'human' && state.factions[id]!.alive && !state.ready.includes(id),
+    );
+    for (const factionId of laggards) {
+      if (state.ended) break;
+      const result = applyAction(state, factionId, { type: 'endTurn' });
+      if (!result.ok) continue; // ไม่ควรเกิดกับ endTurn แต่กันเหนียวไม่ให้ตัวจับเวลาทำเกมพัง
+      seq += 1;
+      try {
+        await this.db.appendAction({
+          gameId: record.id,
+          seq,
+          userId: null, // ระบบบังคับ endTurn เอง ไม่ใช่ผู้เล่นคนไหนกดจริง
+          factionId,
+          turn: state.turn,
+          action: { type: 'endTurn' },
+        });
+      } catch {
+        seq -= 1;
+        break; // เขียน log ไม่สำเร็จ — หยุดไว้ก่อน เหมือน submit() ปกติ ไม่ขยับ state ต่อ
+      }
+      state = result.state;
+      version += 1;
+    }
+
+    const seasonAdvanced = state !== record.state;
+    const next: GameRecord = {
+      ...record,
+      state,
+      version,
+      seq,
+      updatedAt: new Date().toISOString(),
+      seasonDeadline: state.ended ? null : new Date(Date.now() + seasonTimerSeconds * 1000).toISOString(),
+    };
+    await this.store.putGame(next);
+
+    if (seasonAdvanced) {
+      void this.db
+        .putSnapshot({ gameId: record.id, turn: next.state.turn, version: next.version, state: next.state })
+        .catch(() => undefined);
+      if (next.state.ended && !record.state.ended) {
+        const endings: Record<string, string> = {};
+        for (const f of Object.values(next.state.factions)) if (f.ending) endings[f.id] = f.ending;
+        void this.db.markFinished(record.id, endings).catch(() => undefined);
+      }
+      await this.store.publish(record.id, {
+        version: next.version,
+        seq: next.seq,
+        state: next.state,
+        events: [],
+      });
+    }
+    return next;
   }
 }

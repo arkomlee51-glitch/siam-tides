@@ -103,7 +103,7 @@ export interface Store {
   openSocket: () => void;
 
   /** เฟส 5: ห้องรอ/รหัสเชิญ */
-  createLobby: () => Promise<void>;
+  createLobby: (seasonTimerSeconds?: number) => Promise<void>;
   joinLobby: (code: string) => Promise<void>;
   refreshLobby: () => Promise<void>;
   leaveLobby: () => Promise<void>;
@@ -247,12 +247,12 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  async createLobby() {
+  async createLobby(seasonTimerSeconds) {
     if (get().lobbyBusy) return;
     set({ lobbyBusy: true });
     try {
       await ensureSession();
-      const lobby = await createServerLobby({ name: MY_NAME });
+      const lobby = await createServerLobby({ name: MY_NAME, seasonTimerSeconds });
       set({ lobby });
       startLobbyPolling(get);
     } catch (err) {

@@ -43,6 +43,7 @@ export function finishGame(ctx: Ctx): void {
   if (s.ended) return;
   s.ended = true;
   s.pending = [];
+  s.proposals = [];
   s.ready = [];
   for (const f of Object.values(s.factions)) {
     if (f.kind !== 'human') continue;

@@ -1,4 +1,4 @@
-# API (เฟส 4 + ห้องรอเฟส 5)
+# API (เฟส 4 + เฟส 5: ห้องรอ, การทูตมนุษย์-มนุษย์, จำกัดเวลาต่อฤดู)
 
 Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได้ที่ `VITE_API_URL` ฝั่ง web)
 
@@ -67,8 +67,20 @@ ping store จริง คืน `503 { "error": "STORE_UNAVAILABLE" }` ถ้�
 
 ```jsonc
 // 200
-{ "gameId": "uuid", "version": 3, "seq": 3, "factionId": "p1", "view": { "…": "…" } }
+{
+  "gameId": "uuid",
+  "version": 3,
+  "seq": 3,
+  "factionId": "p1",
+  "view": { "…": "…" },
+  // null ถ้าห้องที่สร้างเกมนี้ไม่ได้ตั้งจำกัดเวลาต่อฤดู (ดูหัวข้อ "จำกัดเวลาต่อฤดู" ด้านล่าง)
+  "seasonTimerSeconds": 600,
+  "seasonDeadline": "2026-09-21T10:10:00.000Z",
+}
 ```
+
+`GET`/`POST .../actions`/WebSocket `sync` ทุกตัวจะ **ตรวจและบังคับ endTurn แทนอัตโนมัติ** ถ้า
+`seasonDeadline` เลยมาแล้วแต่ยังมีมนุษย์ไม่ ready ก่อนตอบกลับเสมอ (ดูหัวข้อ "จำกัดเวลาต่อฤดู")
 
 ### `POST /games/:id/actions`
 
@@ -81,8 +93,10 @@ ping store จริง คืน `503 { "error": "STORE_UNAVAILABLE" }` ถ้�
 }
 ```
 
-`action` คือคำสั่ง 14 แบบเดียวกับ `Action` ใน engine (`move`, `attack`, `camp`, `found`, `build`,
-`recruit`, `tribute`, `festival`, `annex`, `declareWar`, `offerPeace`, `envoy`, `answerDecision`, `endTurn`)
+`action` คือคำสั่ง 16 แบบเดียวกับ `Action` ใน engine (`move`, `attack`, `camp`, `found`, `build`,
+`recruit`, `tribute`, `festival`, `annex`, `declareWar`, `offerPeace`, `proposePeace`, `answerProposal`,
+`envoy`, `answerDecision`, `endTurn`) — `proposePeace`/`answerProposal` ใหม่ในเฟส 5 ดูหัวข้อ
+"การทูตมนุษย์-มนุษย์" ด้านล่าง
 
 ```jsonc
 // 200
@@ -123,7 +137,8 @@ client ทิ้งเฟรมที่ `version` ไม่สูงกว่�
 
 ```jsonc
 // request — ทุกฟิลด์ไม่บังคับ
-{ "seed": 12345, "maxTurn": 30, "name": "อาณาจักรนที" }
+// seasonTimerSeconds: 30–604800 (7 วัน) — ไม่ส่ง = ไม่จำกัดเวลาต่อฤดู
+{ "seed": 12345, "maxTurn": 30, "name": "อาณาจักรนที", "seasonTimerSeconds": 600 }
 ```
 
 ```jsonc
@@ -135,6 +150,7 @@ client ทิ้งเฟรมที่ `version` ไม่สูงกว่�
   "maxTurn": 30,
   "seats": [{ "userId": "…", "name": "อาณาจักรนที" }],
   "startedGameId": null,
+  "seasonTimerSeconds": 600,
 }
 ```
 
@@ -167,6 +183,34 @@ Redis เหมือน `POST /games`) แล้วคืน `Snapshot` ขอ�
 `GET /games/:id` เองด้วย token ของตัวเองเพื่อได้ `factionId`/`view` ของตน ห้องไม่ถูกลบทันที
 (`startedGameId` ถูกตั้งไว้ให้คนที่ยัง poll เจอ แล้วปล่อยให้หมดอายุไปเองตาม TTL) เรียกซ้ำได้
 `409 LOBBY_STARTED`
+
+## การทูตมนุษย์-มนุษย์ (เฟส 5)
+
+`tribute` / `festival` / `annex` / `offerPeace` (แบบเดิม จ่ายแล้วมีโอกาสสำเร็จ) ยังใช้ได้แค่กับ AI เท่านั้น
+เหมือนก่อนเฟส 5 — สงบศึกกับมนุษย์ด้วยกันต้องให้อีกฝ่าย**ตอบรับเอง** ผ่านคำสั่งใหม่สองตัว (ไม่มีโอกาสสุ่ม,
+ไม่มีค่าใช้จ่าย, ดู [ADR-0006](adr/0006-human-diplomacy-and-season-timer.md)):
+
+- `proposePeace` — `{ "type": "proposePeace", "target": "p2" }` ต้องอยู่ในภาวะสงครามกับเป้าหมายก่อน
+  เสนอซ้ำทับของเดิมได้ (upsert) ไม่ทำให้ turn ของผู้เสนอถูกบล็อก
+- `answerProposal` — `{ "type": "answerProposal", "proposalId": "…", "accept": true }` เฉพาะผู้ถูกเสนอ
+  (`to`) ตอบได้เท่านั้น — `accept: true` = สงบศึกทันที (`relation.war = false`), `accept: false` = ปฏิเสธ
+  ไม่มีผลอะไรกับความสัมพันธ์
+
+`GameState.proposals` (ผ่าน `view` ที่ได้จาก `viewFor`) กรองให้เห็นเฉพาะข้อเสนอที่ตัวเองเป็น `from` หรือ
+`to` เท่านั้น — คนที่สามมองไม่เห็นข้อเสนอระหว่างอีกสองคน
+
+## จำกัดเวลาต่อฤดู (เฟส 5)
+
+ตั้งได้ตอนสร้างห้องรอเท่านั้น (`POST /lobbies` → `seasonTimerSeconds`) ไม่มีตัวจับเวลา = ไม่บังคับ ถ้ามี
+server จะ**ตรวจตอน request ถัดไปเข้ามา** (ไม่มี background job แยก) — `GET /games/:id`,
+`POST /games/:id/actions`, และ WebSocket `sync` ทุกตัวเช็คก่อนตอบกลับเสมอ ว่า `seasonDeadline` เลยมาหรือยัง
+ถ้าเลยแล้วและยังมีมนุษย์ที่ยังไม่ `endTurn` server จะยิง `endTurn` แทนให้ทุกคนที่ค้างอยู่ (ผ่าน `applyAction`
+ตัวเดียวกับคำสั่งปกติ บันทึกลง `game_actions` เหมือนกันทุกประการ — cold-start replay จึงสร้างผลลัพธ์เดิมซ้ำได้)
+แล้วตั้ง `seasonDeadline` ใหม่ให้ฤดูถัดไป จบเกม (`ended: true`) แล้ว `seasonDeadline` กลับเป็น `null` เสมอ
+
+**ข้อจำกัดที่รู้อยู่**: `seasonTimerSeconds` เก็บอยู่ที่ Redis/memory record เท่านั้น ยังไม่ถูกเขียนลง
+Supabase — ถ้าเกิด cold-start replay (Redis หมดอายุ/instance ใหม่ ดู ADR-0004) เกมนั้นจะกลับไปเป็น
+"ไม่จำกัดเวลา" แทนที่จะจำค่าเดิมไว้ (ปลอดภัยกว่าเดาเวลาใหม่ผิด ๆ แต่ยังไม่ใช่พฤติกรรมที่สมบูรณ์)
 
 ## Error codes
 

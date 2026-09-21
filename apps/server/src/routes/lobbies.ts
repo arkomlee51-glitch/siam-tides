@@ -21,7 +21,13 @@ export async function registerLobbyRoutes(app: FastifyInstance): Promise<void> {
     const auth = await app.auth.verify(token);
     await guardRate(app, `create-lobby:${clientKey(request)}`);
     const displayName = request.body.name?.trim() || auth.email || 'ผู้เล่น';
-    const lobby = await app.lobbies.create(auth.userId, displayName, request.body.seed, request.body.maxTurn);
+    const lobby = await app.lobbies.create(
+      auth.userId,
+      displayName,
+      request.body.seed,
+      request.body.maxTurn,
+      request.body.seasonTimerSeconds,
+    );
     return reply.status(201).send(lobby);
   });
 

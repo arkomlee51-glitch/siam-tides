@@ -29,6 +29,10 @@ export interface Snapshot {
   seq: number;
   factionId: string;
   view: GameState;
+  /** null = ไม่จำกัดเวลาต่อฤดู */
+  seasonTimerSeconds?: number | null;
+  /** เวลา (ISO) ที่ฤดูนี้จะถูกบังคับจบถ้ายังมีมนุษย์ไม่ ready */
+  seasonDeadline?: string | null;
 }
 export type CreatedGame = Snapshot;
 
@@ -102,10 +106,16 @@ export interface Lobby {
   seats: LobbySeat[];
   /** ตั้งแล้ว = host กด "เริ่มเกม" ไปแล้ว — ไปดึงเกมด้วย gameId นี้ต่อ */
   startedGameId: string | null;
+  /** จำกัดเวลาต่อฤดู (วินาที) — undefined = ไม่จำกัด */
+  seasonTimerSeconds?: number;
 }
 
-export const createLobby = (body: { seed?: number; maxTurn?: number; name?: string }) =>
-  request<Lobby>('/lobbies', { method: 'POST', body: JSON.stringify(body) });
+export const createLobby = (body: {
+  seed?: number;
+  maxTurn?: number;
+  name?: string;
+  seasonTimerSeconds?: number;
+}) => request<Lobby>('/lobbies', { method: 'POST', body: JSON.stringify(body) });
 
 export const fetchLobby = (code: string) => request<Lobby>(`/lobbies/${code}`, { method: 'GET' });
 

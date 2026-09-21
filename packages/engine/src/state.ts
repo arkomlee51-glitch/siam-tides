@@ -58,6 +58,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
     order: [],
     relations: {},
     pending: [],
+    proposals: [],
     ready: [],
     log: [],
     chronicle: [],

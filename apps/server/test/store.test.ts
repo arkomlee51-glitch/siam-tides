@@ -34,6 +34,8 @@ const record = (): GameRecord => {
     state: createGame({ seed: 4, humans: [{ id: 'p1' }] }),
     createdAt: now,
     updatedAt: now,
+    seasonTimerSeconds: null,
+    seasonDeadline: null,
   };
 };
 

@@ -13,6 +13,7 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
   const startLobby = useStore((s) => s.startLobby);
   const [code, setCode] = useState('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [timerMinutes, setTimerMinutes] = useState(0);
 
   useEffect(() => {
     void currentUser().then((u) => setMyUserId(u?.id ?? null));
@@ -35,8 +36,24 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <p className="hint">ชวนเพื่อนได้สูงสุด {MAX_SEATS} คน แต่ละคนได้แคว้นของตัวเอง ที่นั่งที่เหลือเป็น AI</p>
+        <label className="acct-form">
+          <span className="muted small">จำกัดเวลาต่อฤดู (นาที, 0 = ไม่จำกัด)</span>
+          <input
+            className="acct-input"
+            type="number"
+            min={0}
+            max={10080}
+            step={1}
+            value={timerMinutes}
+            onChange={(e) => setTimerMinutes(Math.max(0, Math.round(Number(e.target.value) || 0)))}
+          />
+        </label>
         <div className="mbtns">
-          <button className="btn" disabled={lobbyBusy} onClick={() => void createLobby()}>
+          <button
+            className="btn"
+            disabled={lobbyBusy}
+            onClick={() => void createLobby(timerMinutes > 0 ? timerMinutes * 60 : undefined)}
+          >
             สร้างห้องใหม่
           </button>
         </div>

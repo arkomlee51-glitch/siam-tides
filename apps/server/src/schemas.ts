@@ -16,7 +16,7 @@ export type _DecisionChoicesCovered = Assert<Equals<(typeof DECISION_CHOICES)[nu
 const id = z.string().min(1).max(64);
 const coord = z.number().int().min(-99).max(99);
 
-/** คำสั่งทั้ง 14 แบบ — ต้องตรงกับ `Action` ใน engine เสมอ */
+/** คำสั่งทั้ง 16 แบบ — ต้องตรงกับ `Action` ใน engine เสมอ */
 export const ActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('move'), armyId: id, c: coord, r: coord }),
   z.object({ type: z.literal('attack'), armyId: id, c: coord, r: coord }),
@@ -29,6 +29,8 @@ export const ActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('annex'), target: id }),
   z.object({ type: z.literal('declareWar'), target: id }),
   z.object({ type: z.literal('offerPeace'), target: id }),
+  z.object({ type: z.literal('proposePeace'), target: id }),
+  z.object({ type: z.literal('answerProposal'), proposalId: id, accept: z.boolean() }),
   z.object({ type: z.literal('envoy'), power: z.enum(POWER_IDS) }),
   z.object({ type: z.literal('answerDecision'), decisionId: id, choice: z.enum(DECISION_CHOICES) }),
   z.object({ type: z.literal('endTurn') }),
@@ -64,6 +66,8 @@ export const CreateLobbyBody = z.object({
   maxTurn: z.coerce.number().int().min(1).max(120).optional(),
   /** ชื่อของผู้สร้างห้อง (host ได้ที่นั่ง p1 เสมอตอน start) */
   name: z.string().trim().min(1).max(40).optional(),
+  /** จำกัดเวลาต่อฤดู (วินาที) — ถ้าตั้งไว้ ใครไม่กด endTurn ทันเวลาจะถูกบังคับ endTurn แทน ไม่ตั้ง = ไม่จำกัดเวลา */
+  seasonTimerSeconds: z.coerce.number().int().min(30).max(604800).optional(),
 });
 export type CreateLobbyInput = z.infer<typeof CreateLobbyBody>;
 

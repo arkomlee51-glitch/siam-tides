@@ -103,4 +103,81 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     expect(frames.find((f) => f.type === 'sync')?.version).toBe(0);
     expect(frames.find((f) => f.type === 'update')?.version).toBe(1);
   });
+
+  it('ห้องรอ + เกมหลายคนใช้ Redis ข้าม instance ได้จริง (ไม่ใช่แค่เกมเดี่ยว)', async () => {
+    // instance คนละตัวจำลอง server คนละเครื่อง/คนละ process ที่แชร์ Redis เดียวกัน
+    const hostInstance = await redisApp();
+    const joinerInstance = await redisApp();
+
+    const created = await hostInstance.inject({
+      method: 'POST',
+      url: '/lobbies',
+      headers: { authorization: 'Bearer host-1' },
+      payload: { seed: 909 },
+    });
+    expect(created.statusCode).toBe(201);
+    const lobby = created.json() as { code: string };
+
+    // เข้าร่วมผ่าน instance คนละตัวกับที่สร้างห้อง — lobby ต้องอ่านเจอเพราะเก็บใน Redis ไม่ใช่ memory ของ instance เดียว
+    const joined = await joinerInstance.inject({
+      method: 'POST',
+      url: `/lobbies/${lobby.code}/join`,
+      headers: { authorization: 'Bearer p2-user' },
+      payload: {},
+    });
+    expect(joined.statusCode).toBe(200);
+
+    const started = await hostInstance.inject({
+      method: 'POST',
+      url: `/lobbies/${lobby.code}/start`,
+      headers: { authorization: 'Bearer host-1' },
+    });
+    expect(started.statusCode).toBe(201);
+    const game = started.json() as { gameId: string };
+
+    // p2 อ่านเกมผ่าน instance ที่ไม่ได้เริ่มเกม — ต้องได้ view ของตัวเอง (faction p2) ถูกต้องข้าม instance
+    const p2View = await joinerInstance.inject({
+      method: 'GET',
+      url: `/games/${game.gameId}`,
+      headers: { authorization: 'Bearer p2-user' },
+    });
+    expect(p2View.statusCode).toBe(200);
+    expect(p2View.json()).toMatchObject({ factionId: 'p2' });
+
+    // แล้ว pub/sub ของ endTurn ก็ต้องข้าม instance ได้เหมือนเกมเดี่ยว — p2 ต่อ WS เข้า instance ที่เริ่มเกม (host)
+    await hostInstance.listen({ port: 0, host: '127.0.0.1' });
+    const address = hostInstance.server.address();
+    if (!address || typeof address === 'string') throw new Error('ไม่ได้พอร์ตของ server');
+
+    const frames: { type: string; version?: number }[] = [];
+    const socket = new WebSocketClient(
+      `ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=host-1`,
+    );
+    sockets.push(socket);
+    socket.on('message', (raw) => frames.push(JSON.parse(String(raw)) as { type: string; version?: number }));
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve());
+      socket.once('error', reject);
+    });
+
+    const syncDeadline = Date.now() + 3000;
+    while (!frames.some((f) => f.type === 'sync') && Date.now() < syncDeadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
+    // p2 (บน instance คนละตัว) กด endTurn — host ที่ฟัง WS ต้องได้ update ข้าม instance
+    const endTurn = await joinerInstance.inject({
+      method: 'POST',
+      url: `/games/${game.gameId}/actions`,
+      headers: { authorization: 'Bearer p2-user' },
+      payload: { action: { type: 'endTurn' }, expectedVersion: 0, idempotencyKey: idemKey('lobby-cross') },
+    });
+    expect(endTurn.statusCode).toBe(200);
+
+    const deadline = Date.now() + 3000;
+    while (!frames.some((f) => f.type === 'update') && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(frames.find((f) => f.type === 'update')).toBeDefined();
+  });
 });

@@ -38,6 +38,8 @@ server: ตรวจ Supabase JWT (JWKS หรือ HS256 secret, ดู ADR-00
         → idem:{id}:{key} มีอยู่แล้ว = คืนผลเดิมทันที
         → load state: Redis ก่อน ถ้าไม่มี (TTL หมดอายุ/instance ใหม่) โหลดจาก Supabase
           snapshot ล่าสุด + replay game_actions ที่เหลือผ่าน applyAction เดิม แล้วอุ่น Redis กลับ
+        → seasonDeadline เลยมาแล้วหรือยัง (เฟส 5 — ห้องตั้ง seasonTimerSeconds ไว้)? บังคับ endTurn แทน
+          คนที่ยังไม่พร้อมให้ก่อน (applyAction เดิมทุกประการ, ดู ADR-0006) — GET และ ws sync ก็เช็คจุดนี้เหมือนกัน
         → version ตรงไหม? ไม่ตรง = 409 พร้อม view ล่าสุด
         → applyAction → ok? insert game_actions (Supabase, รอผลจริงก่อนถือว่าคำสั่งสำเร็จ)
           → เขียน Redis (version+1) + จำผลไว้ที่ idem key

@@ -85,6 +85,17 @@ export interface PendingDecision {
   demand: number;
 }
 
+export type ProposalKind = 'peace';
+
+/** A proposal one human sends another; only 'to' can answer it. Not a PendingDecision — does not block the sender's own turn. */
+export interface DiplomaticProposal {
+  id: string;
+  kind: ProposalKind;
+  from: FactionId;
+  to: FactionId;
+  turn: number;
+}
+
 export type EventTone = 'info' | 'good' | 'bad' | 'warn';
 export type EventKind =
   'season' | 'economy' | 'battle' | 'diplomacy' | 'power' | 'perk' | 'disaster' | 'city' | 'army' | 'ending';
@@ -136,6 +147,8 @@ export interface GameState {
   order: FactionId[];
   relations: Record<string, Relation>;
   pending: PendingDecision[];
+  /** proposals awaiting the other human's answer (e.g. peace) */
+  proposals: DiplomaticProposal[];
   /** human factions that ended the current season */
   ready: FactionId[];
   log: GameEvent[];
@@ -159,6 +172,8 @@ export type Action =
   | { type: 'annex'; target: FactionId }
   | { type: 'declareWar'; target: FactionId }
   | { type: 'offerPeace'; target: FactionId }
+  | { type: 'proposePeace'; target: FactionId }
+  | { type: 'answerProposal'; proposalId: string; accept: boolean }
   | { type: 'envoy'; power: PowerId }
   | { type: 'answerDecision'; decisionId: string; choice: DecisionChoice }
   | { type: 'endTurn' };
