@@ -1,5 +1,5 @@
 import { lockTimeout } from '../errors.js';
-import type { GameRecord, GameUpdate, RateLimitResult, Store, StoreOptions } from './types.js';
+import type { GameRecord, GameUpdate, LobbyRecord, RateLimitResult, Store, StoreOptions } from './types.js';
 
 interface Expiring<T> {
   value: T;
@@ -16,6 +16,8 @@ export function createMemoryStore(opts: StoreOptions): Store {
   const limits = new Map<string, Expiring<number>>();
   const chains = new Map<string, Promise<void>>();
   const subs = new Map<string, Set<(u: GameUpdate) => void>>();
+  const lobbies = new Map<string, Expiring<LobbyRecord>>();
+  const lobbyChains = new Map<string, Promise<void>>();
 
   const alive = <T>(map: Map<string, Expiring<T>>, key: string): T | null => {
     const hit = map.get(key);
@@ -26,6 +28,39 @@ export function createMemoryStore(opts: StoreOptions): Store {
     }
     return hit.value;
   };
+
+  /** ใช้ร่วมกันระหว่าง withLock/withLobbyLock — ต่างกันแค่ Map ที่เก็บ chain */
+  async function withChainLock<T>(
+    chainMap: Map<string, Promise<void>>,
+    key: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = chainMap.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const chain = previous.then(() => held);
+    chainMap.set(key, chain);
+    let timer: NodeJS.Timeout | undefined;
+    const waited = await Promise.race([
+      previous.then(() => true as const),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), opts.lockWaitMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!waited) {
+      release();
+      throw lockTimeout();
+    }
+    try {
+      return await fn();
+    } finally {
+      release();
+      void chain.then(() => {
+        if (chainMap.get(key) === chain) chainMap.delete(key);
+      });
+    }
+  }
 
   return {
     kind: 'memory',
@@ -43,31 +78,7 @@ export function createMemoryStore(opts: StoreOptions): Store {
     },
 
     async withLock(id, fn) {
-      const previous = chains.get(id) ?? Promise.resolve();
-      let release!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      const chain = previous.then(() => held);
-      chains.set(id, chain);
-      let timer: NodeJS.Timeout | undefined;
-      const waited = await Promise.race([
-        previous.then(() => true as const),
-        new Promise<false>((resolve) => {
-          timer = setTimeout(() => resolve(false), opts.lockWaitMs);
-        }),
-      ]);
-      if (timer) clearTimeout(timer);
-      if (!waited) {
-        release();
-        throw lockTimeout();
-      }
-      try {
-        return await fn();
-      } finally {
-        release();
-        void chain.then(() => {
-          if (chains.get(id) === chain) chains.delete(id);
-        });
-      }
+      return withChainLock(chains, id, fn);
     },
 
     async getIdempotent<T>(gameId: string, key: string): Promise<T | null> {
@@ -115,6 +126,26 @@ export function createMemoryStore(opts: StoreOptions): Store {
       };
     },
 
+    async getLobby(code) {
+      const rec = alive(lobbies, code);
+      return rec ? structuredClone(rec) : null;
+    },
+
+    async putLobby(record) {
+      lobbies.set(record.code, {
+        value: structuredClone(record),
+        expiresAt: Date.now() + opts.lobbyTtlSeconds * 1000,
+      });
+    },
+
+    async deleteLobby(code) {
+      lobbies.delete(code);
+    },
+
+    async withLobbyLock(code, fn) {
+      return withChainLock(lobbyChains, code, fn);
+    },
+
     async ping() {
       /* ไม่มีอะไรต้องตรวจ */
     },
@@ -125,6 +156,8 @@ export function createMemoryStore(opts: StoreOptions): Store {
       limits.clear();
       subs.clear();
       chains.clear();
+      lobbies.clear();
+      lobbyChains.clear();
     },
   };
 }

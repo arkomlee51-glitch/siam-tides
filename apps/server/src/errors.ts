@@ -35,3 +35,11 @@ export const rateLimited = (resetSeconds: number) =>
   new AppError(429, 'RATE_LIMITED', 'ส่งคำสั่งถี่เกินไป', { resetSeconds });
 export const lockTimeout = () =>
   new AppError(503, 'LOCK_TIMEOUT', 'เกมนี้กำลังประมวลผลคำสั่งอื่น ลองใหม่อีกครั้ง');
+
+/* ---------- เฟส 5: ห้องรอ/รหัสเชิญ ---------- */
+export const lobbyNotFound = () => new AppError(404, 'LOBBY_NOT_FOUND', 'ไม่พบห้องรอนี้ รหัสอาจหมดอายุแล้ว');
+export const lobbyFull = () => new AppError(422, 'LOBBY_FULL', 'ห้องรอเต็มแล้ว (สูงสุด 4 คน)');
+export const lobbyStarted = (gameId: string) =>
+  new AppError(409, 'LOBBY_STARTED', 'ห้องรอนี้เริ่มเกมไปแล้ว', { gameId });
+export const lobbyForbidden = () =>
+  new AppError(403, 'FORBIDDEN', 'เฉพาะเจ้าของห้องเท่านั้นที่เริ่มเกมได้');

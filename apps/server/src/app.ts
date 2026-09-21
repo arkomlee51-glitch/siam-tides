@@ -16,9 +16,11 @@ import { createDb } from './db/index.js';
 import type { Db } from './db/index.js';
 import { AppError } from './errors.js';
 import { GameService } from './game/service.js';
+import { LobbyService } from './game/lobby.js';
 import { createStore } from './store/index.js';
 import type { Store } from './store/index.js';
 import { registerGameRoutes } from './routes/games.js';
+import { registerLobbyRoutes } from './routes/lobbies.js';
 import { registerWsRoutes } from './routes/ws.js';
 
 declare module 'fastify' {
@@ -28,6 +30,7 @@ declare module 'fastify' {
     db: Db;
     auth: Verifier;
     games: GameService;
+    lobbies: LobbyService;
   }
 }
 
@@ -62,7 +65,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   app.decorate('store', store);
   app.decorate('db', db);
   app.decorate('auth', auth);
-  app.decorate('games', new GameService(store, db, auth));
+  const games = new GameService(store, db, auth);
+  app.decorate('games', games);
+  app.decorate('lobbies', new LobbyService(store, games));
 
   await app.register(cors, { origin: config.corsOrigin, credentials: true });
   await app.register(websocket, { options: { maxPayload: 1 << 20 } });
@@ -113,6 +118,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   });
 
   await app.register(registerGameRoutes);
+  await app.register(registerLobbyRoutes);
   await app.register(registerWsRoutes);
 
   app.addHook('onClose', async () => {

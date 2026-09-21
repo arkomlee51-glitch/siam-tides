@@ -51,6 +51,13 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
           <button className="btn icon" onClick={() => pushModal({ kind: 'account' })} title="บัญชีและเกมของฉัน">
             บัญชี
           </button>
+          <button
+            className="btn icon"
+            onClick={() => pushModal({ kind: 'lobby' })}
+            title="สร้างห้องหรือใส่รหัสเชิญเพื่อเล่นกับเพื่อน (เฟส 5)"
+          >
+            เล่นหลายคน
+          </button>
           <button className="btn icon" onClick={() => newGame()}>
             เริ่มใหม่
           </button>

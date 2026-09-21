@@ -12,6 +12,7 @@ const opts: StoreOptions = {
   lockWaitMs: 1500,
   rateLimitMax: 3,
   rateLimitWindowSeconds: 60,
+  lobbyTtlSeconds: 3600,
 };
 
 /** ตั้ง TEST_REDIS=1 (และรัน `docker compose up -d`) เพื่อรัน contract เดียวกันกับ Redis จริง */
@@ -33,6 +34,8 @@ const record = (): GameRecord => {
     state: createGame({ seed: 4, humans: [{ id: 'p1' }] }),
     createdAt: now,
     updatedAt: now,
+    seasonTimerSeconds: null,
+    seasonDeadline: null,
   };
 };
 

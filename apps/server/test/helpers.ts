@@ -51,6 +51,7 @@ export async function makeAppWithParts(
     lockWaitMs: config.lockWaitMs ?? 3000,
     rateLimitMax: config.rateLimitMax ?? 10_000,
     rateLimitWindowSeconds: config.rateLimitWindowSeconds ?? 60,
+    lobbyTtlSeconds: config.lobbyTtlSeconds ?? 3600,
   });
   const app = await buildApp({
     config: { store: 'memory', logLevel: 'silent', rateLimitMax: 10_000, ...config },

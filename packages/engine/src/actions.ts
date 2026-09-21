@@ -236,6 +236,9 @@ const handlers: Handlers = {
       const r = relation(s, ai.id, f.id);
       if (!r.war) r.rel -= 5;
     }
+    // Note: declareWar requires !rel.war, and a peace proposal can only exist while
+    // rel.war is true (see proposePeace/answerProposal) — so there is never a stale
+    // proposal to clear here; nothing to do beyond the war declaration itself.
     const audience = t.kind === 'human' ? [f.id, t.id] : [f.id];
     emit(ctx, audience, 'diplomacy', 'bad', `⚔️ ${f.name}ประกาศสงครามกับ${t.name}`);
     chronicle(s, f.id, `ประกาศสงครามกับ${t.name}`);
@@ -259,6 +262,46 @@ const handlers: Handlers = {
       chronicle(s, f.id, `สงบศึกกับ${t.name}`);
     } else {
       emit(ctx, [f.id], 'diplomacy', 'bad', `${t.name}ปฏิเสธการสงบศึก ทรัพย์ที่ส่งไปสูญเปล่า`);
+    }
+    return null;
+  },
+
+  proposePeace(ctx, f, a) {
+    const s = ctx.s;
+    const t = s.factions[a.target];
+    if (!t || !t.alive || t.id === f.id || t.kind !== 'human') return 'INVALID_TARGET';
+    const rel = relation(s, t.id, f.id);
+    if (!rel.war) return 'NOT_AT_WAR';
+    s.proposals = (s.proposals ?? []).filter((p) => !(p.from === f.id && p.to === t.id && p.kind === 'peace'));
+    s.proposals.push({ id: newId(s, 'pr'), kind: 'peace', from: f.id, to: t.id, turn: s.turn });
+    emit(ctx, [t.id], 'diplomacy', 'info', `🕊️ ${f.name}เสนอสงบศึก รอคำตอบ`);
+    chronicle(s, f.id, `เสนอสงบศึกกับ${t.name}`);
+    return null;
+  },
+
+  answerProposal(ctx, f, a) {
+    const s = ctx.s;
+    const proposals = s.proposals ?? [];
+    const p = proposals.find((x) => x.id === a.proposalId && x.to === f.id);
+    if (!p) return 'NOT_FOUND';
+    s.proposals = proposals.filter((x) => x !== p);
+    const other = s.factions[p.from];
+    if (!other) return null;
+    if (a.accept && other.alive) {
+      if (p.kind === 'peace') {
+        const rel = relation(s, f.id, p.from);
+        rel.war = false;
+        rel.rel = RULES.peaceRelation;
+        // a mutual proposal the other way (they also offered peace) is now moot — drop it too.
+        s.proposals = s.proposals.filter(
+          (x) => !((x.from === f.id && x.to === p.from) || (x.from === p.from && x.to === f.id)),
+        );
+        emit(ctx, [f.id, p.from], 'diplomacy', 'good', `🕊️ ${f.name}และ${other.name}ตกลงสงบศึกกัน`);
+        chronicle(s, f.id, `สงบศึกกับ${other.name}`);
+      }
+    } else {
+      emit(ctx, [p.from], 'diplomacy', 'bad', `${f.name}ปฏิเสธข้อเสนอสงบศึกของ${other.name}`);
+      chronicle(s, f.id, `ปฏิเสธข้อเสนอสงบศึกจาก${other.name}`);
     }
     return null;
   },
@@ -315,7 +358,11 @@ export function applyAction(state: GameState, factionId: FactionId, action: Acti
   const handler = handlers[action?.type as Action['type']] as Handler<Action> | undefined;
   if (!handler) return fail('UNKNOWN_ACTION');
   if (state.ready.includes(factionId)) return fail('ALREADY_READY');
-  if (action.type !== 'answerDecision' && state.pending.some((p) => p.faction === factionId))
+  if (
+    action.type !== 'answerDecision' &&
+    action.type !== 'answerProposal' &&
+    state.pending.some((p) => p.faction === factionId)
+  )
     return fail('PENDING_DECISION');
 
   const s = structuredClone(state);

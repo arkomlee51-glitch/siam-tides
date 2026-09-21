@@ -3,6 +3,7 @@ import { ENDINGS, SEASONS, describeDecision, seasonLabel, seasonOf, yearOf } fro
 import type { GameEvent } from '@siam/engine';
 import { ME, useStore } from '../store';
 import { AccountPanel } from './Account';
+import { LobbyPanel } from './Lobby';
 
 function Shell({ children, onClose }: { children: React.ReactNode; onClose?: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -44,6 +45,7 @@ export function Modals() {
   const confirmModal = useStore((s) => s.confirmModal);
   const dispatch = useStore((s) => s.dispatch);
   const newGame = useStore((s) => s.newGame);
+  const leaveLobby = useStore((s) => s.leaveLobby);
   const modal = modals[0];
   const decision = state.pending.find((p) => p.faction === ME);
 
@@ -199,6 +201,18 @@ export function Modals() {
         <AccountPanel onClose={closeModal} />
       </Shell>
     );
+
+  if (modal.kind === 'lobby') {
+    const onCloseLobby = () => {
+      void leaveLobby();
+      closeModal();
+    };
+    return (
+      <Shell onClose={onCloseLobby}>
+        <LobbyPanel onClose={onCloseLobby} />
+      </Shell>
+    );
+  }
 
   const me = state.factions[ME]!;
   const ending = ENDINGS[me.ending ?? 'survive'];

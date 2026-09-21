@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { lockTimeout } from '../errors.js';
-import type { GameRecord, GameUpdate, RateLimitResult, Store, StoreOptions } from './types.js';
+import type { GameRecord, GameUpdate, LobbyRecord, RateLimitResult, Store, StoreOptions } from './types.js';
 
 const stateKey = (id: string) => `game:${id}:state`;
 const lockKey = (id: string) => `game:${id}:lock`;
 const eventsChannel = (id: string) => `game:${id}:events`;
 const idemKey = (gameId: string, key: string) => `idem:${gameId}:${key}`;
 const rlKey = (key: string) => `rl:${key}`;
+const lobbyKey = (code: string) => `lobby:${code}`;
+const lobbyLockKey = (code: string) => `lobby:${code}:lock`;
 
 /** ปล่อย lock ได้เฉพาะเจ้าของ token เดิม กัน lock ที่หมดอายุแล้วไปลบของคนอื่น */
 const RELEASE = `
@@ -46,6 +48,25 @@ export function createRedisStore(opts: RedisStoreOptions): Store {
     return sub;
   }
 
+  /** ใช้ร่วมกันระหว่าง withLock/withLobbyLock — ต่างกันแค่ key */
+  async function withRedisLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const token = randomUUID();
+    const deadline = Date.now() + opts.lockWaitMs;
+    let held = false;
+    while (!held) {
+      const res = await client.set(key, token, 'PX', opts.lockTtlMs, 'NX');
+      held = res === 'OK';
+      if (held) break;
+      if (Date.now() >= deadline) throw lockTimeout();
+      await sleep(25);
+    }
+    try {
+      return await fn();
+    } finally {
+      await client.eval(RELEASE, 1, key, token);
+    }
+  }
+
   return {
     kind: 'redis',
 
@@ -63,22 +84,7 @@ export function createRedisStore(opts: RedisStoreOptions): Store {
     },
 
     async withLock(id, fn) {
-      const token = randomUUID();
-      const key = lockKey(id);
-      const deadline = Date.now() + opts.lockWaitMs;
-      let held = false;
-      while (!held) {
-        const res = await client.set(key, token, 'PX', opts.lockTtlMs, 'NX');
-        held = res === 'OK';
-        if (held) break;
-        if (Date.now() >= deadline) throw lockTimeout();
-        await sleep(25);
-      }
-      try {
-        return await fn();
-      } finally {
-        await client.eval(RELEASE, 1, key, token);
-      }
+      return withRedisLock(lockKey(id), fn);
     },
 
     async getIdempotent<T>(gameId: string, key: string): Promise<T | null> {
@@ -121,6 +127,23 @@ export function createRedisStore(opts: RedisStoreOptions): Store {
           if (subscriber) await subscriber.unsubscribe(channel).catch(() => undefined);
         }
       };
+    },
+
+    async getLobby(code) {
+      const raw = await client.get(lobbyKey(code));
+      return raw ? (JSON.parse(raw) as LobbyRecord) : null;
+    },
+
+    async putLobby(record) {
+      await client.set(lobbyKey(record.code), JSON.stringify(record), 'EX', opts.lobbyTtlSeconds);
+    },
+
+    async deleteLobby(code) {
+      await client.del(lobbyKey(code));
+    },
+
+    async withLobbyLock(code, fn) {
+      return withRedisLock(lobbyLockKey(code), fn);
     },
 
     async ping() {

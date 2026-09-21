@@ -1,4 +1,4 @@
-# API (เฟส 4)
+# API (เฟส 4 + เฟส 5: ห้องรอ, การทูตมนุษย์-มนุษย์, จำกัดเวลาต่อฤดู)
 
 Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได้ที่ `VITE_API_URL` ฝั่ง web)
 
@@ -67,8 +67,20 @@ ping store จริง คืน `503 { "error": "STORE_UNAVAILABLE" }` ถ้�
 
 ```jsonc
 // 200
-{ "gameId": "uuid", "version": 3, "seq": 3, "factionId": "p1", "view": { "…": "…" } }
+{
+  "gameId": "uuid",
+  "version": 3,
+  "seq": 3,
+  "factionId": "p1",
+  "view": { "…": "…" },
+  // null ถ้าห้องที่สร้างเกมนี้ไม่ได้ตั้งจำกัดเวลาต่อฤดู (ดูหัวข้อ "จำกัดเวลาต่อฤดู" ด้านล่าง)
+  "seasonTimerSeconds": 600,
+  "seasonDeadline": "2026-09-21T10:10:00.000Z",
+}
 ```
+
+`GET`/`POST .../actions`/WebSocket `sync` ทุกตัวจะ **ตรวจและบังคับ endTurn แทนอัตโนมัติ** ถ้า
+`seasonDeadline` เลยมาแล้วแต่ยังมีมนุษย์ไม่ ready ก่อนตอบกลับเสมอ (ดูหัวข้อ "จำกัดเวลาต่อฤดู")
 
 ### `POST /games/:id/actions`
 
@@ -81,8 +93,10 @@ ping store จริง คืน `503 { "error": "STORE_UNAVAILABLE" }` ถ้�
 }
 ```
 
-`action` คือคำสั่ง 14 แบบเดียวกับ `Action` ใน engine (`move`, `attack`, `camp`, `found`, `build`,
-`recruit`, `tribute`, `festival`, `annex`, `declareWar`, `offerPeace`, `envoy`, `answerDecision`, `endTurn`)
+`action` คือคำสั่ง 16 แบบเดียวกับ `Action` ใน engine (`move`, `attack`, `camp`, `found`, `build`,
+`recruit`, `tribute`, `festival`, `annex`, `declareWar`, `offerPeace`, `proposePeace`, `answerProposal`,
+`envoy`, `answerDecision`, `endTurn`) — `proposePeace`/`answerProposal` ใหม่ในเฟส 5 ดูหัวข้อ
+"การทูตมนุษย์-มนุษย์" ด้านล่าง
 
 ```jsonc
 // 200
@@ -114,6 +128,90 @@ WebSocket เฟรมเป็น JSON บรรทัดเดียว
 server subscribe ให้ก่อนแล้วจึงส่ง `sync` จึงไม่มีช่องที่ update จะหลุดหาย
 client ทิ้งเฟรมที่ `version` ไม่สูงกว่าที่ถืออยู่
 
+## เฟส 5: ห้องรอ + รหัสเชิญ
+
+สร้างเกมหลายคนต้องผ่านห้องรอก่อนเสมอ (`POST /games` ยังสร้างได้แค่ที่นั่งมนุษย์เดียวเหมือนเดิม) — ดู
+[ADR-0005](adr/0005-lobby-and-invite-codes.md) ทุก endpoint ต้องมี `Authorization` เหมือนกับ `/games`
+
+### `POST /lobbies`
+
+```jsonc
+// request — ทุกฟิลด์ไม่บังคับ
+// seasonTimerSeconds: 30–604800 (7 วัน) — ไม่ส่ง = ไม่จำกัดเวลาต่อฤดู
+{ "seed": 12345, "maxTurn": 30, "name": "อาณาจักรนที", "seasonTimerSeconds": 600 }
+```
+
+```jsonc
+// 201 — ผู้สร้างได้ที่นั่งแรกอัตโนมัติ (จะกลายเป็น p1 เสมอตอนเริ่มเกม)
+{
+  "code": "K7M3XQ",
+  "hostUserId": "uuid ของผู้สร้าง",
+  "seed": 12345,
+  "maxTurn": 30,
+  "seats": [{ "userId": "…", "name": "อาณาจักรนที" }],
+  "startedGameId": null,
+  "seasonTimerSeconds": 600,
+}
+```
+
+รหัสห้อง 6 หลัก ตัวพิมพ์ใหญ่ + เลข ตัดตัวที่อ่านสับสน (`0/O`, `1/I/L`) ออกแล้ว
+
+### `GET /lobbies/:code`
+
+คืนสถานะห้องปัจจุบัน (รูปแบบเดียวกับตอนสร้าง) — client โพลทุก ~2 วินาทีเพื่อดูสมาชิกใหม่และ
+`startedGameId`; ห้องไม่มี/หมดอายุแล้วได้ `404 LOBBY_NOT_FOUND`
+
+### `POST /lobbies/:code/join`
+
+```jsonc
+// request — ไม่บังคับ
+{ "name": "เพื่อนผู้เล่น" }
+```
+
+เข้าร่วมที่นั่งถัดไป (สูงสุด 4 คน) เรียกซ้ำด้วย user เดิมได้ผลเดิม (idempotent, แก้แค่ชื่อถ้าส่งมาใหม่)
+ห้องเต็มแล้วได้ `422 LOBBY_FULL`, ห้องเริ่มไปแล้วได้ `409 LOBBY_STARTED` (พร้อม `details.gameId`)
+
+### `POST /lobbies/:code/leave`
+
+`204` เสมอ (no-op ถ้าไม่ใช่สมาชิกอยู่แล้ว) — **host ออก = ยกเลิกห้องทั้งหมด** สมาชิกที่เหลือจะเจอ
+`404` ตอน poll ครั้งถัดไป
+
+### `POST /lobbies/:code/start`
+
+เฉพาะ host เรียกได้ (`403 FORBIDDEN` ถ้าไม่ใช่) — สร้างเกมจริงจากที่นั่งทั้งหมดตอนนั้น (เขียน Supabase +
+Redis เหมือน `POST /games`) แล้วคืน `Snapshot` ของ host (`factionId: "p1"` เสมอ) ที่นั่งอื่นต้องไป
+`GET /games/:id` เองด้วย token ของตัวเองเพื่อได้ `factionId`/`view` ของตน ห้องไม่ถูกลบทันที
+(`startedGameId` ถูกตั้งไว้ให้คนที่ยัง poll เจอ แล้วปล่อยให้หมดอายุไปเองตาม TTL) เรียกซ้ำได้
+`409 LOBBY_STARTED`
+
+## การทูตมนุษย์-มนุษย์ (เฟส 5)
+
+`tribute` / `festival` / `annex` / `offerPeace` (แบบเดิม จ่ายแล้วมีโอกาสสำเร็จ) ยังใช้ได้แค่กับ AI เท่านั้น
+เหมือนก่อนเฟส 5 — สงบศึกกับมนุษย์ด้วยกันต้องให้อีกฝ่าย**ตอบรับเอง** ผ่านคำสั่งใหม่สองตัว (ไม่มีโอกาสสุ่ม,
+ไม่มีค่าใช้จ่าย, ดู [ADR-0006](adr/0006-human-diplomacy-and-season-timer.md)):
+
+- `proposePeace` — `{ "type": "proposePeace", "target": "p2" }` ต้องอยู่ในภาวะสงครามกับเป้าหมายก่อน
+  เสนอซ้ำทับของเดิมได้ (upsert) ไม่ทำให้ turn ของผู้เสนอถูกบล็อก
+- `answerProposal` — `{ "type": "answerProposal", "proposalId": "…", "accept": true }` เฉพาะผู้ถูกเสนอ
+  (`to`) ตอบได้เท่านั้น — `accept: true` = สงบศึกทันที (`relation.war = false`), `accept: false` = ปฏิเสธ
+  ไม่มีผลอะไรกับความสัมพันธ์
+
+`GameState.proposals` (ผ่าน `view` ที่ได้จาก `viewFor`) กรองให้เห็นเฉพาะข้อเสนอที่ตัวเองเป็น `from` หรือ
+`to` เท่านั้น — คนที่สามมองไม่เห็นข้อเสนอระหว่างอีกสองคน
+
+## จำกัดเวลาต่อฤดู (เฟส 5)
+
+ตั้งได้ตอนสร้างห้องรอเท่านั้น (`POST /lobbies` → `seasonTimerSeconds`) ไม่มีตัวจับเวลา = ไม่บังคับ ถ้ามี
+server จะ**ตรวจตอน request ถัดไปเข้ามา** (ไม่มี background job แยก) — `GET /games/:id`,
+`POST /games/:id/actions`, และ WebSocket `sync` ทุกตัวเช็คก่อนตอบกลับเสมอ ว่า `seasonDeadline` เลยมาหรือยัง
+ถ้าเลยแล้วและยังมีมนุษย์ที่ยังไม่ `endTurn` server จะยิง `endTurn` แทนให้ทุกคนที่ค้างอยู่ (ผ่าน `applyAction`
+ตัวเดียวกับคำสั่งปกติ บันทึกลง `game_actions` เหมือนกันทุกประการ — cold-start replay จึงสร้างผลลัพธ์เดิมซ้ำได้)
+แล้วตั้ง `seasonDeadline` ใหม่ให้ฤดูถัดไป จบเกม (`ended: true`) แล้ว `seasonDeadline` กลับเป็น `null` เสมอ
+
+**ข้อจำกัดที่รู้อยู่**: `seasonTimerSeconds` เก็บอยู่ที่ Redis/memory record เท่านั้น ยังไม่ถูกเขียนลง
+Supabase — ถ้าเกิด cold-start replay (Redis หมดอายุ/instance ใหม่ ดู ADR-0004) เกมนั้นจะกลับไปเป็น
+"ไม่จำกัดเวลา" แทนที่จะจำค่าเดิมไว้ (ปลอดภัยกว่าเดาเวลาใหม่ผิด ๆ แต่ยังไม่ใช่พฤติกรรมที่สมบูรณ์)
+
 ## Error codes
 
 | HTTP | error                 | เมื่อไหร่                                                                                  |
@@ -127,6 +225,9 @@ client ทิ้งเฟรมที่ `version` ไม่สูงกว่�
 | 429  | `RATE_LIMITED`        | ส่งถี่เกิน `details.resetSeconds` บอกเวลาที่ต้องรอ                                         |
 | 503  | `LOCK_TIMEOUT`        | รอ lock ของเกมนานเกิน `LOCK_WAIT_MS`                                                       |
 | 503  | `STORE_UNAVAILABLE`   | `/readyz` ต่อ store ไม่ได้                                                                 |
+| 404  | `LOBBY_NOT_FOUND`     | ไม่มีห้องรอรหัสนี้ หรือหมดอายุแล้ว                                                          |
+| 422  | `LOBBY_FULL`          | ห้องรอเต็มแล้ว (4 คน)                                                                       |
+| 409  | `LOBBY_STARTED`       | ห้องรอนี้เริ่มเกมไปแล้ว — `details.gameId` มี id ของเกมให้ไปต่อ                            |
 
 ## ลำดับการประมวลผลคำสั่ง
 

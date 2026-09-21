@@ -185,6 +185,77 @@ describe('diplomacy', () => {
     expect(armiesOf(s, 'p1')).toHaveLength(2);
     expect(s.factions.p1!.stats.annexed).toBe(1);
   });
+
+  it('lets two humans negotiate peace through a proposal, not a coin flip', () => {
+    let s = createGame({ seed: 1, humans: [{ id: 'a' }, { id: 'b' }] });
+    s = act(s, 'a', { type: 'declareWar', target: 'b' });
+    expect(relation(s, 'a', 'b').war).toBe(true);
+
+    // offerPeace still only works against AI — humans must use proposePeace/answerProposal.
+    const bounced = applyAction(s, 'a', { type: 'offerPeace', target: 'b' });
+    expect(bounced.ok).toBe(false);
+    if (!bounced.ok) expect(bounced.error).toBe('INVALID_TARGET');
+
+    s = act(s, 'a', { type: 'proposePeace', target: 'b' });
+    const proposal = s.proposals.find((p) => p.from === 'a' && p.to === 'b');
+    expect(proposal).toBeDefined();
+    expect(proposal!.kind).toBe('peace');
+    // still at war until b answers — a's own turn isn't blocked by the proposal it sent.
+    expect(relation(s, 'a', 'b').war).toBe(true);
+
+    // a proposal is only visible to its two parties.
+    expect(viewFor(s, 'a').proposals).toHaveLength(1);
+    expect(viewFor(s, 'b').proposals).toHaveLength(1);
+
+    s = act(s, 'b', { type: 'answerProposal', proposalId: proposal!.id, accept: true });
+    expect(relation(s, 'a', 'b').war).toBe(false);
+    expect(s.proposals).toHaveLength(0);
+  });
+
+  it('clears the proposal without making peace when the target declines', () => {
+    let s = createGame({ seed: 1, humans: [{ id: 'a' }, { id: 'b' }] });
+    s = act(s, 'a', { type: 'declareWar', target: 'b' });
+    s = act(s, 'a', { type: 'proposePeace', target: 'b' });
+    const proposal = s.proposals[0]!;
+    s = act(s, 'b', { type: 'answerProposal', proposalId: proposal.id, accept: false });
+    expect(relation(s, 'a', 'b').war).toBe(true);
+    expect(s.proposals).toHaveLength(0);
+  });
+
+  it('rejects a peace proposal outside war, from a non-recipient, or against AI', () => {
+    const s = createGame({ seed: 1, humans: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] });
+    const notAtWar = applyAction(s, 'a', { type: 'proposePeace', target: 'b' });
+    expect(notAtWar.ok).toBe(false);
+    if (!notAtWar.ok) expect(notAtWar.error).toBe('NOT_AT_WAR');
+
+    const vsAi = applyAction(s, 'a', { type: 'proposePeace', target: 'south' });
+    expect(vsAi.ok).toBe(false);
+    if (!vsAi.ok) expect(vsAi.error).toBe('INVALID_TARGET');
+
+    let s2 = act(s, 'a', { type: 'declareWar', target: 'b' });
+    s2 = act(s2, 'a', { type: 'proposePeace', target: 'b' });
+    // c is a bystander human, not the proposal's recipient — cannot answer it.
+    const wrongAnswerer = applyAction(s2, 'c', {
+      type: 'answerProposal',
+      proposalId: s2.proposals[0]!.id,
+      accept: true,
+    });
+    expect(wrongAnswerer.ok).toBe(false);
+    if (!wrongAnswerer.ok) expect(wrongAnswerer.error).toBe('NOT_FOUND');
+  });
+
+  it('clears the other side’s in-flight proposal too when mutual peace offers cross', () => {
+    let s = createGame({ seed: 1, humans: [{ id: 'a' }, { id: 'b' }] });
+    s = act(s, 'a', { type: 'declareWar', target: 'b' });
+    s = act(s, 'a', { type: 'proposePeace', target: 'b' });
+    s = act(s, 'b', { type: 'proposePeace', target: 'a' });
+    expect(s.proposals).toHaveLength(2);
+    const aToB = s.proposals.find((p) => p.from === 'a' && p.to === 'b')!;
+    s = act(s, 'b', { type: 'answerProposal', proposalId: aToB.id, accept: true });
+    expect(relation(s, 'a', 'b').war).toBe(false);
+    // b's own now-moot proposal to a is cleaned up too, not left dangling.
+    expect(s.proposals).toHaveLength(0);
+  });
 });
 
 describe('endings and views', () => {

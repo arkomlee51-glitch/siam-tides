@@ -23,6 +23,12 @@ const envSchema = z.object({
   LOCK_WAIT_MS: z.coerce.number().int().positive().default(3000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(60),
+  /** เฟส 5: ห้องรอที่ไม่มีใครแตะจะหมดอายุใน Redis หลังเวลานี้ (ค่าเริ่มต้น 1 ชั่วโมง) */
+  LOBBY_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60),
 
   /* ---------- เฟส 4: Supabase ---------- */
   /** URL โปรเจกต์ เช่น https://xxxx.supabase.co — ใช้คำนวณ JWKS endpoint และเรียก Postgres REST */
@@ -52,6 +58,7 @@ export interface Config {
   lockWaitMs: number;
   rateLimitMax: number;
   rateLimitWindowSeconds: number;
+  lobbyTtlSeconds: number;
 
   db: 'supabase' | 'memory';
   supabaseUrl: string | undefined;
@@ -103,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     lockWaitMs: e.LOCK_WAIT_MS,
     rateLimitMax: e.RATE_LIMIT_MAX,
     rateLimitWindowSeconds: e.RATE_LIMIT_WINDOW_SECONDS,
+    lobbyTtlSeconds: e.LOBBY_TTL_SECONDS,
 
     db,
     supabaseUrl: e.SUPABASE_URL,

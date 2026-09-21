@@ -12,6 +12,7 @@ export function viewFor(s: GameState, fid: FactionId): GameState {
   const v = structuredClone(s);
   v.log = v.log.filter((e) => visibleTo(e, fid));
   v.pending = v.pending.filter((p) => p.faction === fid);
+  v.proposals = (v.proposals ?? []).filter((p) => p.from === fid || p.to === fid);
   v.rng = 0;
   for (const f of Object.values(v.factions)) {
     if (f.id === fid || f.kind !== 'human') continue;

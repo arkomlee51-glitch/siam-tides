@@ -38,6 +38,8 @@ server: ตรวจ Supabase JWT (JWKS หรือ HS256 secret, ดู ADR-00
         → idem:{id}:{key} มีอยู่แล้ว = คืนผลเดิมทันที
         → load state: Redis ก่อน ถ้าไม่มี (TTL หมดอายุ/instance ใหม่) โหลดจาก Supabase
           snapshot ล่าสุด + replay game_actions ที่เหลือผ่าน applyAction เดิม แล้วอุ่น Redis กลับ
+        → seasonDeadline เลยมาแล้วหรือยัง (เฟส 5 — ห้องตั้ง seasonTimerSeconds ไว้)? บังคับ endTurn แทน
+          คนที่ยังไม่พร้อมให้ก่อน (applyAction เดิมทุกประการ, ดู ADR-0006) — GET และ ws sync ก็เช็คจุดนี้เหมือนกัน
         → version ตรงไหม? ไม่ตรง = 409 พร้อม view ล่าสุด
         → applyAction → ok? insert game_actions (Supabase, รอผลจริงก่อนถือว่าคำสั่งสำเร็จ)
           → เขียน Redis (version+1) + จำผลไว้ที่ idem key
@@ -83,15 +85,16 @@ RLS เปิดทุกตาราง มีเฉพาะ policy อ่า�
 `is_game_participant`) — เขียนได้เฉพาะ service-role key ของ server เท่านั้น (bypass RLS โดยตรง จึงไม่มี
 write policy เลย) รายละเอียดและเหตุผลอยู่ใน [ADR-0004](adr/0004-supabase-jwt-auth-and-event-sourcing.md)
 
-## Redis keys (เฟส 3 — ใช้อยู่)
+## Redis keys (เฟส 3–5 — ใช้อยู่)
 
 ```
 game:{id}:state      JSON ของ GameState + version
 game:{id}:lock       SET NX PX 2000
 game:{id}:events     pub/sub channel
 idem:{id}:{key}      ผลลัพธ์ของคำสั่ง (TTL 10 นาที)
-lobby:{code}         game id (TTL 1 ชั่วโมง) — เฟส 5
-rl:{key}             rate limit counter (create:{ip}, action:{gameId}:{factionId})
+lobby:{code}         JSON ของ LobbyRecord — host, seats, startedGameId (TTL LOBBY_TTL_SECONDS, ค่าเริ่มต้น 1 ชั่วโมง)
+lobby:{code}:lock    SET NX PX — กัน join/leave/start ชนกัน (เฟส 5, ดู ADR-0005)
+rl:{key}             rate limit counter (create:{ip}, create-lobby:{ip}, join-lobby:{ip}, action:{gameId}:{factionId})
 ```
 
 ## สิ่งที่ต้องกลับมาทบทวน
