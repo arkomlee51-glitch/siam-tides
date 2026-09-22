@@ -174,12 +174,14 @@ instance จริงกับ Redis จริง (ลีต้องรัน�
       เดิมตรง ๆ (ไม่พิมพ์ซ้ำ) พิสูจน์ว่า schema รองรับเนื้อหาจริงที่ผ่านบาลานซ์มาแล้ว วางเป็นบท 4 จาก 6
       (ต้นรัตนโกสินทร์ รัชกาลที่ 3–5) — **การจัดวางเป็นข้อเสนอเริ่มต้นของ Claude เอง ยังไม่ผ่านที่ปรึกษา
       ประวัติศาสตร์**
-- [~] **rewire เอนจิน — เริ่มแล้วบางส่วน**: `createGame` (`state.ts`) รับ `chapter?: ChapterDefinition`
-      แล้ว อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพเริ่มต้น/กองรักษาเมืองหลวง/รายชื่อมหาอำนาจต่างชาติจาก chapter
-      จริง (ค่า default ยังพฤติกรรมเดิม 100% — ยืนยันด้วยเทสต์เทียบ state ตรง ๆ, 43 เทสต์ผ่านหมดรวมเทสต์ใหม่
-      5 เคส) **ยังไม่ทำ**: `economy`/`turn`/`ai`/`combat`/`powers`/`endings`/`actions`/`views`/`hex`/
-      `movement` (10 จาก 12 ไฟล์) ยัง import จาก `data.ts` ตรง ๆ — เล่นบทอื่นที่ต่างจาก `data.ts` จริง
-      ยังทำไม่ได้จนกว่าจะ rewire ต่อ (ตั้งใจแบ่งเป็นสไลซ์ย่อยแทนรีบทำรอบเดียว — ดู ADR-0007 Addendum 2)
+- [~] **rewire เอนจิน — ทำชั้น setup แล้ว, ติดคำถามออกแบบสำหรับชั้นกลไก**: `createGame` (`state.ts`)
+      รับ `chapter?: ChapterDefinition` แล้ว อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพเริ่มต้น/กองรักษาเมืองหลวง/
+      รายชื่อมหาอำนาจต่างชาติจาก chapter จริง (ค่า default ยังพฤติกรรมเดิม 100% — 43 เทสต์ผ่านหมด — ดู
+      ADR-0007 Addendum 2) **พบข้อจำกัดสำคัญ (Addendum 3)**: `economy`/`turn`/`combat` มีกลไกเฉพาะบทนี้ฝัง
+      อยู่ในโค้ดจริง ไม่ใช่แค่ข้อมูลที่สลับได้ — perk effect (irrig/print/powder), เหตุการณ์ประจำฤดู
+      (น้ำท่วม/งานบุญ/ภัยแล้งผูกกับ terrain/building id ตรง ๆ), กลไกไผ่ลู่ลมระหว่างสองมหาอำนาจ (`lion`/
+      `eagle` ผูกตรงในโค้ดและใน type `Faction.powers`) — **รอคำตอบจากลี**ว่ากลไกแกนกลางเหมือนกันทุกบทหรือ
+      ต่างกันตามยุค ก่อนออกแบบระบบ effect ทั่วไปหรือจุดขยายต่อบทต่อไป
 - [x] **ที่เก็บ Legacy ใน Supabase** — migration `supabase/migrations/20260921000000_chapter_legacy.sql`
       (`games.chapter_id` + ตาราง `player_legacy`) ทดสอบจริงกับ Postgres จริงผ่าน `@electric-sql/pglite`
       (WASM, ไม่ต้องมี Docker) — DDL/constraint/RLS/upsert ผ่านหมด ดู [ADR-0007](adr/0007-chapter-content-schema-and-legacy.md)
