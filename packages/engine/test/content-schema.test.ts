@@ -11,6 +11,7 @@ import {
   mergeLegacyBonuses,
   validateChapterDefinition,
 } from '../src/index.js';
+import { seasonOf } from '../src/index.js';
 import type { ChapterDefinition } from '../src/index.js';
 
 describe('content schema (เฟส 6)', () => {
@@ -49,6 +50,63 @@ describe('content schema (เฟส 6)', () => {
       expect(message).toContain("terrainOrder references unknown terrain 'ghost'");
       expect(message).toContain("endingOrder references unknown ending 'no-such-ending'");
     }
+  });
+});
+
+describe('createGame reads chapter data (เฟส 6, ADR-0007 ข้อ 7)', () => {
+  it('passing the default chapter explicitly produces the same state as omitting it', () => {
+    const a = createGame({ humans: [{ id: 'p1' }, { id: 'p2' }], seed: 42, maxTurn: 10 });
+    const b = createGame({
+      humans: [{ id: 'p1' }, { id: 'p2' }],
+      seed: 42,
+      maxTurn: 10,
+      chapter: earlyRattanakosinChapter,
+    });
+    expect(b).toEqual(a);
+  });
+
+  it('a chapter with fewer seats caps how many humans can join, not the hard-coded default', () => {
+    const twoSeatChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      seats: earlyRattanakosinChapter.seats.slice(0, 2),
+    };
+    expect(() =>
+      createGame({ humans: [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }], chapter: twoSeatChapter }),
+    ).toThrow(/at most 2 human players/);
+    const s = createGame({ humans: [{ id: 'p1' }, { id: 'p2' }], chapter: twoSeatChapter });
+    expect(s.order).toEqual(['p1', 'p2']);
+  });
+
+  it('starting resources/stability/garrison come from the chapter rules, not data.ts by name', () => {
+    const customChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      rules: {
+        ...earlyRattanakosinChapter.rules,
+        startResources: { rice: 999, man: 1, wealth: 2, faith: 3, know: 4 },
+        startStability: 55,
+        humanCapitalGarrison: 7,
+        maxTurn: 3,
+      },
+    };
+    const s = createGame({ humans: [{ id: 'p1' }], chapter: customChapter });
+    expect(s.factions.p1!.res).toEqual({ rice: 999, man: 1, wealth: 2, faith: 3, know: 4 });
+    expect(s.factions.p1!.stability).toBe(55);
+    expect(s.maxTurn).toBe(3);
+    const capital = s.cities.find((c) => c.owner === 'p1' && c.capital);
+    expect(capital?.garrison).toBe(7);
+  });
+
+  it("a chapter's foreign-power roster drives Faction.powers, not data.ts's POWER_IDS", () => {
+    const oneWayChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      foreignPowers: { lion: earlyRattanakosinChapter.foreignPowers.lion! },
+    };
+    const s = createGame({ humans: [{ id: 'p1' }], chapter: oneWayChapter });
+    expect(Object.keys(s.factions.p1!.powers)).toEqual(['lion']);
+  });
+
+  it('sanity: seasonOf is unaffected by chapter choice (still chapter-agnostic — see boundary note)', () => {
+    expect(seasonOf(1).id).toBe('rain');
   });
 });
 

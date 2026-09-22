@@ -1,5 +1,7 @@
-import { POWER_IDS, RULES, SEASONS, SEATS } from './data.js';
+import { SEASONS } from './data.js';
 import type { SeasonDef } from './data.js';
+import { earlyRattanakosinChapter } from './content/chapters/early-rattanakosin.js';
+import type { ChapterDefinition } from './content/schema.js';
 import type {
   Army,
   ChronicleEntry,
@@ -11,6 +13,7 @@ import type {
   FactionStats,
   GameEvent,
   GameState,
+  PowerId,
   Relation,
 } from './types.js';
 
@@ -28,6 +31,21 @@ export interface CreateGameOptions {
   /** 1–4 human players; they take seats in order center, north, east, south */
   humans?: HumanSeatOptions[];
   maxTurn?: number;
+  /**
+   * Which chapter's seats/starting rules to build the game from. Defaults to the one
+   * chapter that ships today (`content/chapters/early-rattanakosin.ts`, itself derived
+   * from `data.ts`).
+   *
+   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7): only state *setup* (seats, starting resources/
+   * stability/garrison, maxTurn, foreign-power roster) is chapter-driven so far.
+   * `economy.ts`/`turn.ts`/`ai.ts`/`combat.ts`/`powers.ts`/`endings.ts`/`actions.ts`
+   * still import buildings/terrain/perks/demands/endings from `data.ts` directly — so
+   * a chapter whose building/terrain/power ids differ from `data.ts`'s will build a
+   * `GameState` here but then misbehave once play starts (unknown building ids
+   * silently yield nothing, etc.). Passing a different chapter is not supported end
+   * to end yet; this is the first of several planned increments.
+   */
+  chapter?: ChapterDefinition;
 }
 
 const emptyStats = (): FactionStats => ({
@@ -42,8 +60,12 @@ const emptyStats = (): FactionStats => ({
 });
 
 export function createGame(opts: CreateGameOptions = {}): GameState {
+  const chapter = opts.chapter ?? earlyRattanakosinChapter;
+  const seats = chapter.seats;
+  const rules = chapter.rules;
+  const powerIds = Object.keys(chapter.foreignPowers) as PowerId[];
   const humans = opts.humans?.length ? opts.humans : [{ id: 'p1' }];
-  if (humans.length > SEATS.length) throw new Error(`at most ${SEATS.length} human players`);
+  if (humans.length > seats.length) throw new Error(`at most ${seats.length} human players`);
   const ids = new Set<string>();
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 32)) >>> 0;
   const s: GameState = {
@@ -51,7 +73,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
     seed,
     rng: seed,
     turn: 1,
-    maxTurn: opts.maxTurn ?? RULES.maxTurn,
+    maxTurn: opts.maxTurn ?? rules.maxTurn,
     cities: [],
     armies: [],
     factions: {},
@@ -66,7 +88,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
     cityNameIdx: 0,
     ended: false,
   };
-  SEATS.forEach((seat, i) => {
+  seats.forEach((seat, i) => {
     const human = humans[i];
     const id = human ? human.id : seat.id;
     if (ids.has(id) || id.includes('|')) throw new Error(`invalid or duplicate faction id: ${id}`);
@@ -75,17 +97,19 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       id,
       name: human?.name ?? seat.factionName,
       kind: human ? 'human' : 'ai',
-      seat: seat.id,
+      // seat.id is a plain string in ChapterDefinition (data-driven); GameState's Faction.seat
+      // still uses the literal SeatId union — see the "NOTE (เฟส 6)" doc comment above.
+      seat: seat.id as Faction['seat'],
       colorToken: seat.colorToken,
       alive: true,
-      res: { ...RULES.startResources },
+      res: { ...rules.startResources },
       knowTotal: 0,
       faithTotal: 0,
-      stability: RULES.startStability,
+      stability: rules.startStability,
       sovereignty: 100,
       meter: 0,
       extremeTurns: 0,
-      powers: Object.fromEntries(POWER_IDS.map((p) => [p, { patience: 3 }])) as Faction['powers'],
+      powers: Object.fromEntries(powerIds.map((p) => [p, { patience: 3 }])) as Faction['powers'],
       perks: [],
       stats: emptyStats(),
       recruitCd: 0,
@@ -93,7 +117,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
     };
     s.factions[id] = f;
     s.order.push(id);
-    const g = human ? RULES.humanCapitalGarrison : seat.city.aiGarrison;
+    const g = human ? rules.humanCapitalGarrison : seat.city.aiGarrison;
     s.cities.push({
       id: newId(s, 'c'),
       name: seat.city.name,
@@ -101,7 +125,8 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       r: seat.city.r,
       owner: id,
       capital: true,
-      buildings: [...seat.city.buildings],
+      // same data-driven-string-to-literal-union note as `seat` above
+      buildings: [...seat.city.buildings] as City['buildings'],
       garrison: g,
       baseGarrison: g,
     });
@@ -124,7 +149,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       let rel = 0;
       if (a.kind !== b.kind) {
         const ai = a.kind === 'ai' ? a : b;
-        rel = SEATS.find((x) => x.id === ai.seat)?.aiRelation ?? 0;
+        rel = seats.find((x) => x.id === ai.seat)?.aiRelation ?? 0;
       }
       s.relations[pairKey(a.id, b.id)] = { rel, war: false };
     }
