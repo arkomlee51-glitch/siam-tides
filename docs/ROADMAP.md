@@ -174,18 +174,20 @@ instance จริงกับ Redis จริง (ลีต้องรัน�
       เดิมตรง ๆ (ไม่พิมพ์ซ้ำ) พิสูจน์ว่า schema รองรับเนื้อหาจริงที่ผ่านบาลานซ์มาแล้ว วางเป็นบท 4 จาก 6
       (ต้นรัตนโกสินทร์ รัชกาลที่ 3–5) — **การจัดวางเป็นข้อเสนอเริ่มต้นของ Claude เอง ยังไม่ผ่านที่ปรึกษา
       ประวัติศาสตร์**
-- [~] **rewire เอนจิน — ทำชั้น setup + ระบบ effect ของ perk แล้ว, เหตุการณ์ประจำฤดู/กลไกสองมหาอำนาจยังไม่ทำ**:
-  `createGame` (`state.ts`) รับ `chapter?: ChapterDefinition` อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพ
-  เริ่มต้น/กองรักษาเมืองหลวง/รายชื่อมหาอำนาจต่างชาติจาก chapter จริง (ADR-0007 Addendum 2) **พบข้อจำกัด
-  สำคัญ (Addendum 3)**: `economy`/`turn`/`combat` มีกลไกเฉพาะบทนี้ฝังอยู่ในโค้ดจริง ไม่ใช่แค่ข้อมูลที่
-  สลับได้ — **ลีตัดสินใจแล้ว (Addendum 4): 6 บทใช้กลไกแกนกลางเดียวกัน แค่เปลี่ยนหน้าตา** → เริ่มระบบ
-  effect ทั่วไป: `PerkDefData.effects` ประกาศผลของ perk เป็นข้อมูล (`resourceMultiplier`/
-  `combatMultiplier`), `GameState.chapterId` + registry (`content/chapters/index.ts`) ให้
-  `computeIncome`/`checkPerks`/`resolveBattle` lookup เนื้อหาบทได้จริง (48 เทสต์ผ่านหมด รวม 5 เคสใหม่ที่
-  พิสูจน์ด้วย perk id ที่เอนจินไม่เคยรู้จักมาก่อนว่าไม่ได้ผูกกับ `irrig`/`powder`/`print` ตรง ๆ อีกแล้ว) —
-  **ยังไม่ทำ**: เหตุการณ์ประจำฤดู (น้ำท่วม/งานบุญ/ภัยแล้งผูกกับ terrain/building id ตรง ๆ) กับกลไก
-  ไผ่ลู่ลมระหว่างสองมหาอำนาจ (`lion`/`eagle` ผูกตรงในโค้ดและใน type `Faction.powers`) ยังไม่แปลงเป็นข้อมูล
-  — เป็นสไลซ์ถัดไปตามทิศทางเดียวกัน
+- [~] **rewire เอนจิน — ทำชั้น setup + ระบบ effect ของ perk/อาคาร/ภูมิประเทศ/สองมหาอำนาจแล้ว, โครงเหตุการณ์
+  ประจำฤดูเองยังไม่ทำ**: `createGame` (`state.ts`) รับ `chapter?: ChapterDefinition` อ่าน seats/
+  ทรัพยากรเริ่มต้น/เสถียรภาพเริ่มต้น/กองรักษาเมืองหลวง/รายชื่อมหาอำนาจต่างชาติจาก chapter จริง (ADR-0007
+  Addendum 2) **พบข้อจำกัดสำคัญ (Addendum 3)**: `economy`/`turn`/`combat`/`powers` มีกลไกเฉพาะบทนี้ฝังอยู่
+  ในโค้ดจริง ไม่ใช่แค่ข้อมูลที่สลับได้ — **ลีตัดสินใจแล้ว (Addendum 4): 6 บทใช้กลไกแกนกลางเดียวกัน แค่
+  เปลี่ยนหน้าตา** → เริ่มระบบ effect ทั่วไป: `PerkDefData.effects` (Addendum 4) แล้วขยายไปถึง
+  `BuildingDefData.effects` (`stabilityPerCity`/`disasterLossReduction`), `TerrainDefData.disasterExposure`,
+  และกลไกไผ่ลู่ลมสองมหาอำนาจ — `allPowersPatient`/`offeringPower` วนตามจำนวน/รายชื่อมหาอำนาจที่ chapter
+  ลงทะเบียนจริง ไม่ผูกกับ `lion`/`eagle` ตรง ๆ อีกต่อไป, `powers.ts` ทั้งไฟล์อ่านจาก chapter แล้ว
+  (Addendum 5) — `GameState.chapterId` + registry (`content/chapters/index.ts`) ให้ฟังก์ชัน pure lookup
+  เนื้อหาบทได้จริง (58 เทสต์ผ่านหมด รวม 15 เคสใหม่ที่พิสูจน์ด้วยชื่ออาคาร/ภัยพิบัติ/มหาอำนาจที่เอนจินไม่เคย
+  รู้จักมาก่อนว่าไม่ได้ผูกกับ literal string เดิมอีกแล้ว) — **ยังไม่ทำ**: โครงสร้างเหตุการณ์ประจำฤดูเอง (ฤดู
+  ไหนเกิดอะไร, โอกาสเกิด, ข้อความบรรยาย) ยัง hardcode ใน `turn.ts`'s `seasonalEvents` เหมือนเดิม — ตั้งใจรอ
+  เนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ schema (ดู Addendum 5)
 - [x] **ที่เก็บ Legacy ใน Supabase** — migration `supabase/migrations/20260921000000_chapter_legacy.sql`
       (`games.chapter_id` + ตาราง `player_legacy`) ทดสอบจริงกับ Postgres จริงผ่าน `@electric-sql/pglite`
       (WASM, ไม่ต้องมี Docker) — DDL/constraint/RLS/upsert ผ่านหมด ดู [ADR-0007](adr/0007-chapter-content-schema-and-legacy.md)

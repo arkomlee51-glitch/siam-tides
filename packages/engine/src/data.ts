@@ -11,7 +11,7 @@ import type {
   SeatId,
   TerrainId,
 } from './types.js';
-import type { PerkEffect } from './content/schema.js';
+import type { BuildingEffect, PerkEffect } from './content/schema.js';
 
 /**
  * Offset (odd-r) hex map, pointy-top.
@@ -59,6 +59,8 @@ export interface TerrainDef {
   cost: number;
   def: number;
   yield: Partial<Resources>;
+  /** seasonal-disaster ids this terrain is exposed to, e.g. `['flood']` — see turn.ts */
+  disasterExposure?: readonly string[];
 }
 
 export const TERRAIN: Record<TerrainId, TerrainDef> = {
@@ -69,6 +71,7 @@ export const TERRAIN: Record<TerrainId, TerrainDef> = {
     cost: 1,
     def: 1.0,
     yield: { rice: 2, man: 0.5 },
+    disasterExposure: ['flood'],
   },
   K: { id: 'K', name: 'ที่ราบสูงโคราช', short: 'ที่ราบสูง', cost: 1, def: 1.1, yield: { rice: 1, man: 1 } },
   L: { id: 'L', name: 'ที่สูงล้านนา', short: 'ที่สูง', cost: 2, def: 1.3, yield: { rice: 1, faith: 1 } },
@@ -149,6 +152,8 @@ export interface BuildingDef {
   yield: Partial<Resources>;
   coastalOnly?: boolean;
   garrisonBonus?: number;
+  /** what it does beyond base yield, applied generically by turn.ts — see content/schema.ts */
+  effects?: readonly BuildingEffect[];
 }
 
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
@@ -158,6 +163,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     desc: 'ข้าว +6 และลดความเสียหายจากน้ำท่วม',
     cost: { wealth: 30 },
     yield: { rice: 6 },
+    effects: [{ kind: 'disasterLossReduction', disaster: 'flood', reducedLoss: 8 }],
   },
   market: {
     id: 'market',
@@ -172,6 +178,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     desc: 'ศรัทธา +3 และเสถียรภาพ +1 ทุกฤดู',
     cost: { wealth: 25, man: 5 },
     yield: { faith: 3 },
+    effects: [{ kind: 'stabilityPerCity', amount: 1 }],
   },
   academy: { id: 'academy', name: 'หอความรู้', desc: 'ความรู้ +3', cost: { wealth: 40 }, yield: { know: 3 } },
   walls: {

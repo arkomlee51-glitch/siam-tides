@@ -231,17 +231,70 @@ multiplier}`, `SeasonalEventDef` ที่ประกาศเงื่อน�
 ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม เพราะ Redis), web 29 เคสผ่านหมด, `eslint .` และ
 `prettier --check` สะอาด, `npm run build -w @siam/engine` ผ่าน
 
+## Addendum 5 (รอบต่อมา): ขยายระบบ effect ไปถึงอาคาร/ภูมิประเทศ/สองมหาอำนาจ
+
+ต่อจาก Addendum 4 (ระบบ effect ของ perk) — ทำสไลซ์ที่สองตามทิศทางเดียวกัน (ลีตัดสินใจแล้วว่า 6 บทใช้กลไก
+แกนกลางเดียวกัน แค่เปลี่ยนหน้าตา) โดยแปลงจุดที่เหลือใน Addendum 3 ที่ยังทำได้โดยไม่ต้องคิดค้น schema
+เหตุการณ์ประจำฤดูแบบเต็มรูปแบบ:
+
+- **อาคารประกาศผลเป็นข้อมูล** — `BuildingDefData` เพิ่ม `effects?: readonly BuildingEffect[]`
+  (`stabilityPerCity` / `disasterLossReduction`) `data.ts` ประกาศผลจริงของ `temple` (เสถียรภาพ +1 ต่อเมือง)
+  และ `granary` (ลดความเสียหายน้ำท่วมเหลือ 8) เป็นข้อมูลแทน `buildings.includes('temple')`/
+  `buildings.includes('granary')` ที่ hardcode ไว้เดิมใน `turn.ts`
+- **ภูมิประเทศประกาศความเสี่ยงภัยเป็นข้อมูล** — `TerrainDefData` เพิ่ม `disasterExposure?: readonly string[]`
+  `TERRAIN.C` (ที่ราบลุ่ม) ประกาศ `['flood']` แทน `terrainAt(...) === 'C'` ที่ hardcode ไว้เดิม — `disaster`
+  เป็น free-form string (ไม่ใช่ enum) เพื่อให้บทอื่นนิยามภัยพิบัติที่เอนจินไม่เคยรู้จักได้ (เช่น แผ่นดินไหว
+  ดินถล่ม) โดยไม่ต้องแก้ type
+- **กลไกไผ่ลู่ลม (สองมหาอำนาจ) ทั่วไปแล้ว ไม่ผูกกับ `lion`/`eagle` ตรง ๆ** —
+  - `turn.ts`'s `internalAffairs`: เดิม `f.powers.lion.patience >= 2 && f.powers.eagle.patience >= 2`
+    (เช็คตรงกับ 2 ชื่อนี้เท่านั้น) → ตอนนี้ `allPowersPatient(f, chapter)` เช็คว่าทุกมหาอำนาจที่บทลงทะเบียน
+    ไว้มีความอดทน ≥ 2 หมด — ใช้ได้กับกี่มหาอำนาจก็ได้ ไม่ใช่ผูกตายตัวกับ 2
+  - `powers.ts`'s `offeringPower`: เดิม `year % 2 === 1 ? 'lion' : 'eagle'` (สลับตรงระหว่าง 2 ชื่อนี้) →
+    ตอนนี้ `offeringPower(chapter, year)` วนตามลำดับมหาอำนาจที่บทประกาศไว้จริง (`Object.keys(chapter.
+foreignPowers)`) — สำหรับบทที่ชิปวันนี้ (2 มหาอำนาจ) ให้ผลเหมือนเดิมทุกประการ
+  - `powers.ts` ทั้งไฟล์ (queueOffer/queueUltimatum/applyOffer/answerDecision/sendEnvoy/shiftMeter) รื้อจาก
+    อ่าน `POWERS`/`DEMANDS`/`COSTS`/`RULES` ของ `data.ts` ตรง ๆ มาอ่านจาก `chapter.foreignPowers`/
+    `chapter.demands`/`chapter.costs`/`chapter.rules` ผ่าน `getChapterById(ctx.s.chapterId)` แทน — ปิดไฟล์
+    นี้ทั้งไฟล์จากรายการที่ยัง "import จาก data.ts ตรง ๆ" ใน Addendum 2/3
+  - `turn.ts` เปลี่ยนทุกจุดที่อ้าง `RULES.*` (dangerZone/balancedZone/balancedKnowBonus/extremeLimit/
+    aiWarThreshold/aiWarChance/expansionIrritation) เป็น `chapter.rules.*` เช่นกัน เพราะ `ChapterRulesData`
+    มีฟิลด์เหล่านี้ครบอยู่แล้วตั้งแต่ Addendum 1 ไม่ต้องเพิ่ม schema ใหม่
+  - `apps/web/src/ui/BambooTab.tsx` ปรับตามลายเซ็นใหม่ของ `offeringPower` (ส่ง `earlyRattanakosinChapter`
+    เข้าไปตรง ๆ เพราะเว็บยังไม่ chapter-aware — ขอบเขตเดิม) และถือโอกาสทำให้การคำนวณ "ใครจะยื่นข้อเสนอปี
+    หน้า" ทั่วไปด้วย (เดิม `thisYear === 'lion' ? 'eagle' : 'lion'` ก็ผูกกับ 2 ชื่อนี้เหมือนกัน)
+- เทสต์ใหม่ 10 เคส พิสูจน์ทั้งความเท่ากันกับพฤติกรรมเดิม (`buildingStabilityBonus`/`disasterMitigation`/
+  `allPowersPatient`/`offeringPower` ให้ผลตรงกับบทที่ชิปวันนี้ทุกกรณี รวมเทสต์ end-to-end ผ่าน `endTurn`
+  จริงที่ผูกกับค่าที่ประกาศในข้อมูลโดยตรง ไม่ hardcode ตัวเลขซ้ำในเทสต์) และความเป็นระบบทั่วไปจริง (สร้าง
+  อาคาร/ภัยพิบัติ/มหาอำนาจที่เอนจินไม่เคยเห็นชื่อมาก่อน เช่น `shrine-of-unity`, `seawall`+`tsunami`, บทที่มี
+  มหาอำนาจ 1 หรือ 3 ราย ชื่อ `north`/`south`/`east` แล้วพิสูจน์ว่ากลไกยังทำงานถูกต้อง — รวมถึงเคสบทที่ไม่มี
+  มหาอำนาจเลยต้อง throw ข้อความชัดเจนแทนที่จะวนลูปพัง)
+
+**ขอบเขตที่ยังไม่ทำ (ตั้งใจหยุดตรงนี้)**: ตัวโครงสร้างเหตุการณ์ประจำฤดูเอง (ฤดูไหนเกิดอะไรได้บ้าง, โอกาส
+เกิดเท่าไร, ข้อความบรรยาย, ผลกระทบต่อความสัมพันธ์ทางการทูต) ยัง hardcode เป็นโค้ดใน `seasonalEvents`
+เหมือนเดิมทั้งหมด — ที่แปลงได้ในรอบนี้คือ "ภูมิประเทศไหนเสี่ยงภัยอะไร" กับ "อาคารไหนลดความเสียหายเท่าไร"
+เท่านั้น เพราะสองอย่างนี้มีรูปแบบชัดเจนพอจะออกแบบ schema ได้โดยไม่ต้องเดา ส่วนเหตุการณ์ทั้งหมด (ฤดูฝนน้ำท่วม,
+ฤดูหนาวงานบุญ/กระทบกระทั่งชายแดน, ฤดูร้อนภัยแล้ง/ของขวัญ) ยังเป็นเนื้อหาเฉพาะภูมิศาสตร์ลุ่มน้ำเจ้าพระยาที่
+ผูกกับฤดูกาลไทย 3 ฤดู — ออกแบบ `SeasonalEventDef` แบบเต็มรูปแบบตอนนี้เสี่ยงเดาผิดเพราะยังไม่รู้ว่าอีก 5 บทที่
+เหลือ (รอที่ปรึกษาประวัติศาสตร์ตาม ROADMAP.md) ต้องการเหตุการณ์แบบไหนจริง ๆ — รอเนื้อหาบทจริงอย่างน้อยอีกบท
+หนึ่งก่อนออกแบบ schema นี้จะปลอดภัยกว่า เก็บไว้เป็นงานถัดไปที่ยังไม่ลงมือ
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, engine test suite 58 เคสผ่านหมด (48 เดิม + 10
+ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint .` และ `prettier --check` สะอาด,
+`npm run build -w @siam/engine` ผ่าน
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
   เป็น opt-in ยังไม่มีอะไรเรียกใช้จาก `createGame`/routes จริง
 - **ทำแล้วบางส่วน (Addendum 2)**: `createGame` อ่าน seats/starting rules/foreign powers จาก
   `ChapterDefinition` แล้ว
-- **ทำแล้วบางส่วน (Addendum 4, ตามคำตอบลี — เหมือนกันทุกบทแค่เปลี่ยนหน้าตา)**: ระบบ effect ทั่วไปสำหรับ
-  perk — `economy.ts`'s `resourceMultiplier`/`combat.ts`'s `combatMultiplier` อ่าน `PerkEffect` data แทน
-  hardcode perk id, `GameState.chapterId` + registry (`content/chapters/index.ts`) ให้ฟังก์ชัน pure
-  lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: เหตุการณ์ประจำฤดูใน `turn.ts` กับกลไกสองมหาอำนาจ (bamboo
-  diplomacy) ยังฝังเป็นโค้ดเหมือนเดิม (perk ที่ทำไปคือสไลซ์แรกของทิศทางที่ตัดสินใจแล้ว ไม่ใช่ทั้งหมด)
+- **ทำแล้วบางส่วน (Addendum 4+5, ตามคำตอบลี — เหมือนกันทุกบทแค่เปลี่ยนหน้าตา)**: ระบบ effect ทั่วไปสำหรับ
+  perk (`resourceMultiplier`/`combatMultiplier`), อาคาร (`stabilityPerCity`/`disasterLossReduction`),
+  ภูมิประเทศ (`disasterExposure`) และกลไกสองมหาอำนาจ (`allPowersPatient`/`offeringPower` ทั่วไปแล้ว ไม่ผูก
+  `lion`/`eagle` ตรง ๆ, `powers.ts` ทั้งไฟล์อ่านจาก chapter แล้ว) — `GameState.chapterId` + registry
+  (`content/chapters/index.ts`) ให้ฟังก์ชัน pure lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: โครงสร้างเหตุการณ์
+  ประจำฤดูเอง (ฤดูไหนเกิดอะไร, โอกาสเกิด, ข้อความ) ยังฝังเป็นโค้ดใน `turn.ts`'s `seasonalEvents` เหมือนเดิม
+  — ตั้งใจรอเนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ schema นี้ (ดู Addendum 5)
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
   ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
   เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude

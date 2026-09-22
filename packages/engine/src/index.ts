@@ -36,6 +36,7 @@ export type { ReachTile } from './movement.js';
 export { evaluateEnding, endingProgress } from './endings.js';
 export type { EndingProgress } from './endings.js';
 export { offeringPower, choicesFor } from './powers.js';
+export { buildingStabilityBonus, allPowersPatient, disasterMitigation } from './turn.js';
 export { applyAction, foundBlocker, ERROR_MESSAGES } from './actions.js';
 export { combatMultiplier } from './combat.js';
 export { viewFor, describeDecision, fmtCost, seasonalCost } from './views.js';

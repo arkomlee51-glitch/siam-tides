@@ -54,6 +54,8 @@ export interface TerrainDefData {
   cost: number;
   def: number;
   yield: PartialResourceAmounts;
+  /** seasonal-disaster ids this terrain is exposed to, e.g. `['flood']` — see turn.ts */
+  disasterExposure?: readonly string[];
 }
 
 export interface SeasonDefData {
@@ -70,6 +72,17 @@ export interface SeasonDefData {
   tip: string;
 }
 
+/**
+ * What a building does beyond its base `yield`, as data — same "effect declared as
+ * data, applied generically" pattern as `PerkEffect` (see docs/adr/0007 Addendum 5).
+ * `disaster` is a free-form id (e.g. `'flood'`) matched against a terrain's
+ * `disasterExposure` and a seasonal event's own disaster id in `turn.ts` — not an
+ * enum, so a future chapter can introduce disasters this one never had.
+ */
+export type BuildingEffect =
+  | { kind: 'stabilityPerCity'; amount: number }
+  | { kind: 'disasterLossReduction'; disaster: string; reducedLoss: number };
+
 export interface BuildingDefData {
   id: string;
   name: string;
@@ -78,6 +91,8 @@ export interface BuildingDefData {
   yield: PartialResourceAmounts;
   coastalOnly?: boolean;
   garrisonBonus?: number;
+  /** narrative/mechanical effects beyond base yield — see `BuildingEffect` doc comment */
+  effects?: readonly BuildingEffect[];
 }
 
 /**

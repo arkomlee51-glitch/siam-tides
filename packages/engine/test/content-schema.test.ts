@@ -4,19 +4,25 @@ import {
   ChapterValidationError,
   LEGACY_CAPS,
   LEGACY_CATEGORIES,
+  allPowersPatient,
   applyLegacyBonuses,
+  buildingStabilityBonus,
   combatMultiplier,
   computeIncome,
   computeLegacyBonuses,
   createGame,
+  disasterMitigation,
   earlyRattanakosinChapter,
   mergeLegacyBonuses,
+  offeringPower,
   resourceMultiplier,
   validateChapterDefinition,
 } from '../src/index.js';
 import { seasonOf } from '../src/index.js';
+import { act } from './helpers.js';
+import type { BuildingId } from '../src/index.js';
 import type { ChapterDefinition, PerkDefData } from '../src/index.js';
-import type { PerkId } from '../src/index.js';
+import type { PerkId, PowerId } from '../src/index.js';
 
 describe('content schema (เฟส 6)', () => {
   it('accepts the chapter ported from the shipping data.ts content', () => {
@@ -256,5 +262,146 @@ describe('perk effects are data, not hard-coded perk ids (ADR-0007 Addendum 4)',
     const baseIncome = computeIncome(base, base.factions.p1!);
     const boostedIncome = computeIncome(boosted, boosted.factions.p1!);
     expect(boostedIncome.rice).toBeGreaterThan(baseIncome.rice);
+  });
+});
+
+describe('building/terrain effects and foreign-power generalization (ADR-0007 Addendum 5)', () => {
+  it("buildingStabilityBonus matches the shipped chapter's declared temple effect", () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 10 });
+    const f = s.factions.p1!;
+    const capital = s.cities.find((c) => c.owner === 'p1' && c.capital)!;
+    capital.buildings = ['temple'];
+    expect(buildingStabilityBonus(s, f, earlyRattanakosinChapter)).toBe(1);
+    capital.buildings = [];
+    expect(buildingStabilityBonus(s, f, earlyRattanakosinChapter)).toBe(0);
+  });
+
+  it('buildingStabilityBonus is generic: an invented building the shipped chapter has never seen still works', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 11 });
+    const f = s.factions.p1!;
+    const capital = s.cities.find((c) => c.owner === 'p1' && c.capital)!;
+    capital.buildings = ['shrine-of-unity' as BuildingId];
+    const customChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        'shrine-of-unity': {
+          id: 'shrine-of-unity',
+          name: 'ทดสอบ',
+          desc: 'ทดสอบ',
+          cost: {},
+          yield: {},
+          effects: [{ kind: 'stabilityPerCity', amount: 5 }],
+        },
+      },
+    };
+    expect(buildingStabilityBonus(s, f, customChapter)).toBe(5);
+    // the shipped chapter's own building list doesn't know this building — proves the
+    // lookup reads `chapter.buildings`, not a literal 'temple' check
+    expect(buildingStabilityBonus(s, f, earlyRattanakosinChapter)).toBe(0);
+  });
+
+  it('end-to-end: a temple in a city raises stability by exactly the effect declared in data', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 20, maxTurn: 5 });
+    const capital = s.cities.find((c) => c.owner === 'p1' && c.capital)!;
+    capital.buildings = ['temple'];
+    const before = s.factions.p1!.stability;
+    const after = act(s, 'p1', { type: 'endTurn' });
+    const declaredBonus = earlyRattanakosinChapter.buildings.temple!.effects![0]!;
+    expect(declaredBonus.kind).toBe('stabilityPerCity');
+    expect(after.factions.p1!.stability).toBe(before + (declaredBonus as { amount: number }).amount);
+  });
+
+  it('disasterMitigation matches the shipped granary/flood declaration', () => {
+    expect(disasterMitigation(earlyRattanakosinChapter, ['granary'], 'flood')).toMatchObject({
+      reducedLoss: 8,
+    });
+    expect(disasterMitigation(earlyRattanakosinChapter, [], 'flood')).toBeUndefined();
+    expect(disasterMitigation(earlyRattanakosinChapter, ['granary'], 'earthquake')).toBeUndefined();
+  });
+
+  it('disasterMitigation is generic: an invented building/disaster pair the engine has never seen still works', () => {
+    const customChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        seawall: {
+          id: 'seawall',
+          name: 'ทดสอบ',
+          desc: 'ทดสอบ',
+          cost: {},
+          yield: {},
+          effects: [{ kind: 'disasterLossReduction', disaster: 'tsunami', reducedLoss: 3 }],
+        },
+      },
+    };
+    expect(disasterMitigation(customChapter, ['seawall'], 'tsunami')).toMatchObject({ reducedLoss: 3 });
+    expect(disasterMitigation(customChapter, ['seawall'], 'flood')).toBeUndefined();
+  });
+
+  it('allPowersPatient matches the original 2-power bamboo-diplomacy behavior', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 12 });
+    const f = s.factions.p1!;
+    f.powers.lion.patience = 2;
+    f.powers.eagle.patience = 2;
+    expect(allPowersPatient(f, earlyRattanakosinChapter)).toBe(true);
+    f.powers.eagle.patience = 1;
+    expect(allPowersPatient(f, earlyRattanakosinChapter)).toBe(false);
+  });
+
+  it('allPowersPatient is genuinely generic across power count, not hard-coded to exactly lion+eagle', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 13 });
+    const f = s.factions.p1!;
+    const threePowerChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      foreignPowers: {
+        north: { id: 'north', name: 'ทดสอบเหนือ', icon: '❄️', side: -1 },
+        south: { id: 'south', name: 'ทดสอบใต้', icon: '🔥', side: 1 },
+        east: { id: 'east', name: 'ทดสอบตะวันออก', icon: '🌅', side: 1 },
+      },
+    };
+    const threePowers = {
+      north: { patience: 2 },
+      south: { patience: 2 },
+      east: { patience: 2 },
+    } as unknown as typeof f.powers;
+    expect(allPowersPatient({ ...f, powers: threePowers }, threePowerChapter)).toBe(true);
+    const oneImpatient = { ...threePowers, east: { patience: 1 } } as unknown as typeof f.powers;
+    expect(allPowersPatient({ ...f, powers: oneImpatient }, threePowerChapter)).toBe(false);
+
+    // single-power chapter also works — no special-casing "exactly 2"
+    const onePowerChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      foreignPowers: { north: { id: 'north', name: 'ทดสอบ', icon: '❄️', side: -1 } },
+    };
+    const onePower = { north: { patience: 2 } } as unknown as typeof f.powers;
+    expect(allPowersPatient({ ...f, powers: onePower }, onePowerChapter)).toBe(true);
+  });
+
+  it('offeringPower matches the original odd/even-year lion/eagle alternation for the shipped chapter', () => {
+    expect(offeringPower(earlyRattanakosinChapter, 1)).toBe('lion');
+    expect(offeringPower(earlyRattanakosinChapter, 2)).toBe('eagle');
+    expect(offeringPower(earlyRattanakosinChapter, 3)).toBe('lion');
+    expect(offeringPower(earlyRattanakosinChapter, 4)).toBe('eagle');
+  });
+
+  it('offeringPower is generic: cycles through however many foreign powers a chapter declares', () => {
+    const threePowerChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      foreignPowers: {
+        north: { id: 'north', name: 'ทดสอบเหนือ', icon: '❄️', side: -1 },
+        south: { id: 'south', name: 'ทดสอบใต้', icon: '🔥', side: 1 },
+        east: { id: 'east', name: 'ทดสอบตะวันออก', icon: '🌅', side: 1 },
+      },
+    };
+    expect(offeringPower(threePowerChapter, 1)).toBe('north' as PowerId);
+    expect(offeringPower(threePowerChapter, 2)).toBe('south' as PowerId);
+    expect(offeringPower(threePowerChapter, 3)).toBe('east' as PowerId);
+    expect(offeringPower(threePowerChapter, 4)).toBe('north' as PowerId);
+  });
+
+  it('offeringPower throws clearly for a chapter with no foreign powers rather than looping forever', () => {
+    const noPowerChapter: ChapterDefinition = { ...earlyRattanakosinChapter, foreignPowers: {} };
+    expect(() => offeringPower(noPowerChapter, 1)).toThrow(/no foreign powers/);
   });
 });

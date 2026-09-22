@@ -1,4 +1,14 @@
-import { COSTS, POWERS, POWER_IDS, RULES, canPay, offeringPower, seasonOf, yearOf } from '@siam/engine';
+import {
+  COSTS,
+  POWERS,
+  POWER_IDS,
+  RULES,
+  canPay,
+  earlyRattanakosinChapter,
+  offeringPower,
+  seasonOf,
+  yearOf,
+} from '@siam/engine';
 import { ME, useStore } from '../store';
 import { costText, seasonalCostOf } from './format';
 
@@ -30,8 +40,8 @@ export function BambooTab() {
   const me = state.factions[ME]!;
   const z = zone(me.meter);
   const envoy = seasonalCostOf(state, COSTS.envoy, 'diplo');
-  const thisYear = offeringPower(yearOf(state.turn));
-  const next = thisYear === 'lion' ? 'eagle' : 'lion';
+  const thisYear = offeringPower(earlyRattanakosinChapter, yearOf(state.turn));
+  const next = offeringPower(earlyRattanakosinChapter, yearOf(state.turn) + 1);
   const upcoming =
     seasonOf(state.turn).id === 'hot'
       ? `ฤดูร้อนปีหน้า ${POWERS[next].name}จะยื่นข้อเสนอ`
