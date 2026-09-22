@@ -118,12 +118,44 @@ RLS policy ผ่านเอนจินฐานข้อมูลจริง
 `null` ให้ DDL ผ่าน ไม่ได้จำลองการยืนยันตัวตนจริง) — ยังควรรันซ้ำกับ Supabase project จริง (`npx supabase db
 push` หรือ SQL editor) ก่อนขึ้น production เหมือนเดิม
 
+## Addendum 2 (รอบต่อมา): เริ่ม rewire จริง — แค่ชั้น setup ของ `createGame`
+
+ทำสไลซ์แรกของ "ยังไม่ทำ" ข้อ 7 (rewire เอนจินให้อ่าน `ChapterDefinition` จริง): `createGame()` (`state.ts`)
+รับ `opts.chapter?: ChapterDefinition` แล้วใช้ `chapter.seats`/`chapter.rules`/`chapter.foreignPowers` แทน
+`SEATS`/`RULES`/`POWER_IDS` จาก `data.ts` ตรง ๆ — ค่า default ยังเป็น `earlyRattanakosinChapter` (ซึ่ง derive
+จาก `data.ts` อยู่แล้ว) ดังนั้นพฤติกรรมเริ่มต้นเหมือนเดิม 100% (ยืนยันด้วยเทสต์ที่เทียบ state ตรง ๆ ว่า
+`createGame({...})` กับ `createGame({..., chapter: earlyRattanakosinChapter})` ได้ state เท่ากันทุกบิต)
+
+**ขอบเขตของสไลซ์นี้ — สำคัญที่ต้องเข้าใจ**: มีแค่ชั้น "ตั้งค่าเริ่มต้น" เท่านั้นที่ chapter-driven แล้ว
+(ที่นั่ง, ทรัพยากรเริ่มต้น, เสถียรภาพเริ่มต้น, กองทหารรักษาเมืองหลวง, รายชื่อมหาอำนาจต่างชาติ) — `economy.ts`/
+`turn.ts`/`ai.ts`/`combat.ts`/`powers.ts`/`endings.ts`/`actions.ts`/`views.ts`/`hex.ts`/`movement.ts` (10
+จาก 12 ไฟล์ในเอนจิน) **ยังคง import จาก `data.ts` ตรง ๆ เหมือนเดิม** ผลคือ: ส่ง chapter ที่มี building/
+terrain/perk/power id ต่างจาก `data.ts` เข้าไปตอนนี้จะสร้าง `GameState` ได้ก็จริง แต่พอเริ่มเล่น (คำนวณ
+รายได้เมือง, การรบ, AI ตัดสินใจ) จะพังแบบเงียบ ๆ (id ไม่รู้จัก → yield เป็น 0 หรือ error) — **ยังใช้เล่นบท
+อื่นที่ต่างจาก `data.ts` จริงไม่ได้** จนกว่าจะ rewire ไฟล์ที่เหลือ
+
+**ทำไมหยุดแค่นี้ในรอบนี้**: `state.ts` เป็นจุดเดียวที่แยก "ตั้งค่า" ออกจาก "กลไกระหว่างเล่น" ได้ชัดเจนโดยไม่
+ต้องแตะฟังก์ชันอื่น เปลี่ยนแล้วพิสูจน์ได้ทันทีว่าพฤติกรรมเดิมไม่เปลี่ยน (43 เทสต์ผ่านหมด รวมเทสต์ใหม่ 5 เคส
+ที่ตรวจตรง ๆ ว่าอ่านจาก chapter จริง ไม่ใช่จาก `data.ts` โดยบังเอิญ) — ไฟล์ที่เหลืออีก 10 ไฟล์ผูกกันแน่นกว่า
+มาก (เช่น `economy.cityYield` ต้อง lookup ทั้ง `TERRAIN` และ `BUILDINGS`, `ai.ts` ตัดสินใจโดยอ้างอิง `RULES`
+หลายสิบค่า) เปลี่ยนพร้อมกันหมดในรอบเดียวเสี่ยงเหมือนที่เตือนไว้ในข้อ 7 เดิม — แบ่งเป็นสไลซ์ต่อไปดีกว่า
+
+**ข้อจำกัดที่ยอมรับไว้ (cast ที่ขอบเขต)**: `types.ts` ยังไม่เปลี่ยน (`Faction.seat: SeatId`,
+`City.buildings: BuildingId[]` ยังเป็น literal union) แต่ `ChapterDefinition` (schema.ts) ใช้ `string`
+ทั่วไปเพื่อให้ data-driven ได้จริง — จุดต่อระหว่างสองฝั่งนี้ใน `createGame()` จึงมี type cast ที่ตั้งใจ 2 จุด
+(`seat.id as Faction['seat']`, `seat.city.buildings as City['buildings']`) กำกับด้วยคอมเมนต์อธิบายไว้ —
+`validateChapterDefinition()` ตรวจโครงสร้างได้ แต่ไม่ได้ตรวจว่า string ตรงกับ literal union ของ `types.ts`
+เป๊ะ ๆ (เพราะ `types.ts` เองก็ยังไม่ data-driven) — จะหมดปัญหานี้เมื่อ `types.ts` ถูก generalize เป็นส่วนหนึ่ง
+ของ rewire รอบถัดไป
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
   เป็น opt-in ยังไม่มีอะไรเรียกใช้จาก `createGame`/routes จริง
-- **ยังไม่ทำ**: rewire `createGame`/`economy`/`turn`/`ai`/`combat`/`powers` ให้รับ `ChapterDefinition` แทน
-  import จาก `data.ts` ตรง ๆ — งานถัดไปที่ควรทำก่อนเขียนเนื้อหาบทอื่นจริงจัง
+- **ทำแล้วบางส่วน (Addendum 2)**: `createGame` อ่าน seats/starting rules/foreign powers จาก
+  `ChapterDefinition` แล้ว — **ยังไม่ทำ**: `economy`/`turn`/`ai`/`combat`/`powers`/`endings`/`actions`/
+  `views`/`hex`/`movement` (10 จาก 12 ไฟล์) ยัง import จาก `data.ts` ตรง ๆ — เล่นบทอื่นที่ต่างจาก `data.ts`
+  จริงยังทำไม่ได้จนกว่าจะ rewire ต่อ
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
   ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
   เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude
