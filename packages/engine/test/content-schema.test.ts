@@ -5,14 +5,18 @@ import {
   LEGACY_CAPS,
   LEGACY_CATEGORIES,
   applyLegacyBonuses,
+  combatMultiplier,
+  computeIncome,
   computeLegacyBonuses,
   createGame,
   earlyRattanakosinChapter,
   mergeLegacyBonuses,
+  resourceMultiplier,
   validateChapterDefinition,
 } from '../src/index.js';
 import { seasonOf } from '../src/index.js';
-import type { ChapterDefinition } from '../src/index.js';
+import type { ChapterDefinition, PerkDefData } from '../src/index.js';
+import type { PerkId } from '../src/index.js';
 
 describe('content schema (เฟส 6)', () => {
   it('accepts the chapter ported from the shipping data.ts content', () => {
@@ -184,5 +188,73 @@ describe('legacy bonuses (เฟส 6)', () => {
     expect(adj.stabilityBonus).toBe(0);
     expect(adj.armyStrMultiplier).toBe(1);
     expect(adj.relationBonus).toBe(0);
+  });
+});
+
+describe('perk effects are data, not hard-coded perk ids (ADR-0007 Addendum 4)', () => {
+  it('resourceMultiplier is 1 for a faction with no matching perk unlocked', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 5 });
+    const f = s.factions.p1!;
+    expect(resourceMultiplier(f, 'rice', earlyRattanakosinChapter)).toBe(1);
+    expect(resourceMultiplier(f, 'know', earlyRattanakosinChapter)).toBe(1);
+  });
+
+  it("matches the shipped chapter's declared perk multipliers once unlocked", () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 6 });
+    const f = s.factions.p1!;
+    f.perks.push('irrig');
+    expect(resourceMultiplier(f, 'rice', earlyRattanakosinChapter)).toBeCloseTo(1.2);
+    expect(resourceMultiplier(f, 'know', earlyRattanakosinChapter)).toBe(1); // irrig doesn't touch know
+    f.perks.push('print');
+    expect(resourceMultiplier(f, 'know', earlyRattanakosinChapter)).toBeCloseTo(1.3);
+  });
+
+  it('combatMultiplier is 1 with no combat perk, matches the declared value once unlocked', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 7 });
+    const f = s.factions.p1!;
+    expect(combatMultiplier(f, earlyRattanakosinChapter)).toBe(1);
+    f.perks.push('powder');
+    expect(combatMultiplier(f, earlyRattanakosinChapter)).toBeCloseTo(1.2);
+  });
+
+  it('is genuinely generic: a perk with an id the engine has never seen still applies its declared effect', () => {
+    // proves resourceMultiplier/combatMultiplier read `perk.effects` data rather than
+    // branching on the literal strings 'irrig'/'powder'/'print' — a chapter could name
+    // its perks anything.
+    const madeUpPerk: PerkDefData = {
+      id: 'monsoon-canals',
+      at: 10,
+      name: 'คลองมรสุม',
+      desc: 'ทดสอบ: ผลผลิตทรัพย์ +50%',
+      effects: [{ kind: 'resourceMultiplier', resource: 'wealth', multiplier: 1.5 }],
+    };
+    const madeUpCombatPerk: PerkDefData = {
+      id: 'steel-hulls',
+      at: 20,
+      name: 'เรือเหล็ก',
+      desc: 'ทดสอบ: พลังรบ +40%',
+      effects: [{ kind: 'combatMultiplier', multiplier: 1.4 }],
+    };
+    const customChapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      perks: [madeUpPerk, madeUpCombatPerk],
+    };
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 8 });
+    const f = s.factions.p1!;
+    expect(resourceMultiplier(f, 'wealth', customChapter)).toBe(1); // not unlocked yet
+    f.perks.push('monsoon-canals' as PerkId);
+    expect(resourceMultiplier(f, 'wealth', customChapter)).toBeCloseTo(1.5);
+    expect(combatMultiplier(f, customChapter)).toBe(1); // steel-hulls not unlocked
+    f.perks.push('steel-hulls' as PerkId);
+    expect(combatMultiplier(f, customChapter)).toBeCloseTo(1.4);
+  });
+
+  it('computeIncome applies the resource multiplier through the full income calculation', () => {
+    const base = createGame({ humans: [{ id: 'p1' }], seed: 9, maxTurn: 5 });
+    const boosted = createGame({ humans: [{ id: 'p1' }], seed: 9, maxTurn: 5 });
+    boosted.factions.p1!.perks.push('irrig');
+    const baseIncome = computeIncome(base, base.factions.p1!);
+    const boostedIncome = computeIncome(boosted, boosted.factions.p1!);
+    expect(boostedIncome.rice).toBeGreaterThan(baseIncome.rice);
   });
 });

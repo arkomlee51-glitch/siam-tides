@@ -11,6 +11,7 @@ import type {
   SeatId,
   TerrainId,
 } from './types.js';
+import type { PerkEffect } from './content/schema.js';
 
 /**
  * Offset (odd-r) hex map, pointy-top.
@@ -252,11 +253,31 @@ export interface PerkDef {
   at: number;
   name: string;
   desc: string;
+  /** what it does, applied generically by economy.ts/combat.ts — see content/schema.ts */
+  effects: readonly PerkEffect[];
 }
 export const PERKS: readonly PerkDef[] = [
-  { id: 'irrig', at: 25, name: 'ระบบชลประทาน', desc: 'ผลผลิตข้าว +20%' },
-  { id: 'powder', at: 60, name: 'ดินปืน', desc: 'พลังบุกและพลังรับ +20%' },
-  { id: 'print', at: 100, name: 'การพิมพ์', desc: 'ความรู้ +30%' },
+  {
+    id: 'irrig',
+    at: 25,
+    name: 'ระบบชลประทาน',
+    desc: 'ผลผลิตข้าว +20%',
+    effects: [{ kind: 'resourceMultiplier', resource: 'rice', multiplier: 1.2 }],
+  },
+  {
+    id: 'powder',
+    at: 60,
+    name: 'ดินปืน',
+    desc: 'พลังบุกและพลังรับ +20%',
+    effects: [{ kind: 'combatMultiplier', multiplier: 1.2 }],
+  },
+  {
+    id: 'print',
+    at: 100,
+    name: 'การพิมพ์',
+    desc: 'ความรู้ +30%',
+    effects: [{ kind: 'resourceMultiplier', resource: 'know', multiplier: 1.3 }],
+  },
 ];
 
 export interface PowerDef {

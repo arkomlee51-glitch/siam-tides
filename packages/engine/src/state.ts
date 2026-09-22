@@ -36,14 +36,25 @@ export interface CreateGameOptions {
    * chapter that ships today (`content/chapters/early-rattanakosin.ts`, itself derived
    * from `data.ts`).
    *
-   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7): only state *setup* (seats, starting resources/
-   * stability/garrison, maxTurn, foreign-power roster) is chapter-driven so far.
-   * `economy.ts`/`turn.ts`/`ai.ts`/`combat.ts`/`powers.ts`/`endings.ts`/`actions.ts`
-   * still import buildings/terrain/perks/demands/endings from `data.ts` directly — so
-   * a chapter whose building/terrain/power ids differ from `data.ts`'s will build a
-   * `GameState` here but then misbehave once play starts (unknown building ids
-   * silently yield nothing, etc.). Passing a different chapter is not supported end
-   * to end yet; this is the first of several planned increments.
+   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7 + Addendum 4): state *setup* (seats, starting
+   * resources/stability/garrison, maxTurn, foreign-power roster) is chapter-driven, and
+   * so is the generic perk-effect system (`economy.ts`'s `resourceMultiplier`,
+   * `combat.ts`'s `combatMultiplier`, `checkPerks` all resolve chapter data by
+   * `GameState.chapterId` via `content/chapters/index.ts#getChapterById`, not by
+   * reading `data.ts` directly). Two things still don't follow this `chapter` param,
+   * though:
+   * (1) `checkPerks`/`computeIncome`/`resolveBattle` resolve chapter content from the
+   *     **registry**, keyed by `chapter.manifest.id` — NOT from the specific
+   *     `ChapterDefinition` object passed here. A caller that passes a `chapter` object
+   *     with the same `manifest.id` as a registered chapter but *different* `perks`/
+   *     `rules` gets setup from the object it passed, but gameplay functions will use
+   *     the registered chapter's data instead. Only relevant once a second chapter is
+   *     registered with a genuinely different id.
+   * (2) `turn.ts`'s seasonal events (temple/granary/flood-prone-terrain checks) and the
+   *     two-foreign-power "bamboo diplomacy" meter (`f.powers.lion`/`f.powers.eagle`)
+   *     are still hard-coded to those specific building/terrain/power ids — not yet
+   *     expressed as chapter data. `ai.ts`/`powers.ts`/`endings.ts`/`actions.ts`/
+   *     `views.ts`/`hex.ts`/`movement.ts` also still import from `data.ts` directly.
    */
   chapter?: ChapterDefinition;
 }
@@ -70,6 +81,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 32)) >>> 0;
   const s: GameState = {
     schemaVersion: 1,
+    chapterId: chapter.manifest.id,
     seed,
     rng: seed,
     turn: 1,

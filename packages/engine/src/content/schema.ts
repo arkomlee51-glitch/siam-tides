@@ -80,12 +80,26 @@ export interface BuildingDefData {
   garrisonBonus?: number;
 }
 
+/**
+ * What a perk actually DOES, as data — not a hard-coded string-id check in economy.ts/
+ * combat.ts. See docs/adr/0007 Addendum 4. A perk can carry more than one effect (e.g.
+ * a "renaissance" perk could boost both know and faith at once); each effect kind is
+ * applied generically by every chapter, since all six chapters share identical
+ * mechanics and differ only in flavor (names/desc/numbers), per the product decision
+ * in ADR-0007 Addendum 4.
+ */
+export type PerkEffect =
+  | { kind: 'resourceMultiplier'; resource: CoreResourceId; multiplier: number }
+  | { kind: 'combatMultiplier'; multiplier: number };
+
 export interface PerkDefData {
   id: string;
   /** knowledge threshold that unlocks it */
   at: number;
   name: string;
   desc: string;
+  /** what it does, applied generically — see `PerkEffect` doc comment */
+  effects: readonly PerkEffect[];
 }
 
 export interface ForeignPowerDefData {

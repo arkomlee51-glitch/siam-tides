@@ -1,4 +1,6 @@
 import { RULES, TERRAIN } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
+import type { ChapterDefinition } from './content/schema.js';
 import { hasPerk } from './economy.js';
 import { hexDistance, neighbors, terrainAt } from './hex.js';
 import { randRange } from './rng.js';
@@ -16,7 +18,24 @@ import {
   seasonOf,
 } from './state.js';
 import type { Ctx } from './state.js';
-import type { Army, BattleReport, City, FactionId } from './types.js';
+import type { Army, BattleReport, City, Faction, FactionId, PerkId } from './types.js';
+
+/**
+ * Combined multiplier a faction's unlocked perks apply to combat power, generic over
+ * which chapter is active — same "perks declare effects as data" pattern as
+ * `economy.ts`'s `resourceMultiplier` (docs/adr/0007 Addendum 4). 1 when no unlocked
+ * perk grants a combat bonus.
+ */
+export function combatMultiplier(f: Faction, chapter: ChapterDefinition): number {
+  let m = 1;
+  for (const perk of chapter.perks) {
+    if (!hasPerk(f, perk.id as PerkId)) continue;
+    for (const eff of perk.effects) {
+      if (eff.kind === 'combatMultiplier') m *= eff.multiplier;
+    }
+  }
+  return m;
+}
 
 function retreatTile(ctx: Ctx, army: Army, from: Army): [number, number] | null {
   let best: [number, number] | null = null;
@@ -97,10 +116,11 @@ export function resolveBattle(ctx: Ctx, att: Army, tc: number, tr: number): Batt
   const cityMod = city
     ? RULES.cityDefense * (walls ? RULES.wallsDefense : 1) * (city.capital ? RULES.capitalDefense : 1)
     : 1;
+  const chapter = getChapterById(s.chapterId);
   const attF = faction(s, att.owner);
   const defF = faction(s, defender);
-  const pAtk = hasPerk(attF, 'powder') ? 1.2 : 1;
-  const pDef = hasPerk(defF, 'powder') ? 1.2 : 1;
+  const pAtk = combatMultiplier(attF, chapter);
+  const pDef = combatMultiplier(defF, chapter);
   const atkStr = att.str;
   const atkMor = att.morale;
   const g0 = city?.garrison ?? 0;
@@ -162,7 +182,8 @@ export function resolveBattle(ctx: Ctx, att: Army, tc: number, tr: number): Batt
     `${S.icon} ${S.name} ปรับพลังบุก ×${S.atk}`,
     `ภูมิประเทศ${TERRAIN[t].short} ปรับพลังรับ ×${tDef}${city ? `, ตัวเมือง ×${cityMod.toFixed(2)}${walls ? ' (มีกำแพง)' : ''}${isCapital ? ' (เมืองหลวง)' : ''}` : ''}`,
   ];
-  if (pAtk > 1 || pDef > 1) lines.push('วิทยาการดินปืนเพิ่มพลัง ×1.2');
+  if (pAtk !== 1) lines.push(`วิทยาการของ${attF.name}เพิ่มพลังบุก ×${pAtk.toFixed(2)}`);
+  if (pDef !== 1) lines.push(`วิทยาการของ${defF.name}เพิ่มพลังรับ ×${pDef.toFixed(2)}`);
   lines.push(`ความสูญเสีย: ฝ่ายบุก −${attLoss}, ฝ่ายรับ −${defLoss}`);
   if (captured) lines.push(`🏯 ยึดเมือง${place}ได้`);
   else if (routed) lines.push('ทัพฝ่ายรับแตกพ่าย');

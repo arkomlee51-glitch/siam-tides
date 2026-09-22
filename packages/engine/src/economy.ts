@@ -1,4 +1,6 @@
-import { BUILDINGS, PERKS, RESOURCE_IDS, RULES, TERRAIN } from './data.js';
+import { BUILDINGS, RESOURCE_IDS, RULES, TERRAIN } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
+import type { ChapterDefinition, CoreResourceId } from './content/schema.js';
 import { isCoastal, isRiver, neighbors, terrainAt } from './hex.js';
 import { armiesOf, chronicle, citiesOf, emit, seasonOf } from './state.js';
 import type { Ctx } from './state.js';
@@ -27,17 +29,35 @@ export const hasPerk = (f: Faction, id: PerkId): boolean => f.perks.includes(id)
 export const upkeepOf = (s: GameState, fid: FactionId): number =>
   armiesOf(s, fid).reduce((sum, a) => sum + Math.ceil(a.str / RULES.upkeepPerStr), 0);
 
+/**
+ * Combined multiplier a faction's unlocked perks apply to one core resource, generic
+ * over which chapter is active (docs/adr/0007 Addendum 4 — perks declare effects as
+ * data, `economy.ts`/`combat.ts` apply them the same way regardless of chapter). 1 when
+ * no unlocked perk touches that resource.
+ */
+export function resourceMultiplier(f: Faction, resource: CoreResourceId, chapter: ChapterDefinition): number {
+  let m = 1;
+  for (const perk of chapter.perks) {
+    if (!hasPerk(f, perk.id as PerkId)) continue;
+    for (const eff of perk.effects) {
+      if (eff.kind === 'resourceMultiplier' && eff.resource === resource) m *= eff.multiplier;
+    }
+  }
+  return m;
+}
+
 export interface Income extends Resources {
   upkeep: number;
 }
 /** Net income a faction receives when the current season resolves. */
 export function computeIncome(s: GameState, f: Faction): Income {
+  const chapter = getChapterById(s.chapterId);
   const S = seasonOf(s.turn);
   const inc = zero();
   for (const city of citiesOf(s, f.id)) addInto(inc, cityYield(city));
-  inc.rice *= S.rice * (hasPerk(f, 'irrig') ? 1.2 : 1);
+  inc.rice *= S.rice * resourceMultiplier(f, 'rice', chapter);
   inc.man *= S.man;
-  if (hasPerk(f, 'print')) inc.know *= 1.3;
+  inc.know *= resourceMultiplier(f, 'know', chapter);
   for (const k of RESOURCE_IDS) inc[k] = Math.round(inc[k]);
   const upkeep = upkeepOf(s, f.id);
   inc.rice -= upkeep;
@@ -68,9 +88,11 @@ export function gainFaith(f: Faction, n: number): void {
 }
 
 export function checkPerks(ctx: Ctx, f: Faction): void {
-  for (const p of PERKS) {
-    if (f.knowTotal >= p.at && !hasPerk(f, p.id)) {
-      f.perks.push(p.id);
+  const chapter = getChapterById(ctx.s.chapterId);
+  for (const p of chapter.perks) {
+    const id = p.id as PerkId;
+    if (f.knowTotal >= p.at && !hasPerk(f, id)) {
+      f.perks.push(id);
       emit(ctx, [f.id], 'perk', 'good', `📜 ค้นพบวิทยาการ “${p.name}” ${p.desc}`);
       chronicle(ctx.s, f.id, `ค้นพบวิทยาการ${p.name}`);
     }

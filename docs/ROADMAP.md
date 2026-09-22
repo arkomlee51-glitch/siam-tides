@@ -145,13 +145,13 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
       instance จริง (ข้อต่อไปด้านล่าง) — ที่ทดสอบแล้วคือ contract ฝั่ง server (fresh connect/resync ต้องได้
       state ถูกต้องเสมอ) ซึ่งเป็นสิ่งที่ backoff-reconnect ฝั่ง client (`apps/web/src/api/socket.ts`) พึ่งพาอยู่
 - [~] Redis pub/sub ข้าม instance กับห้องรอ/เกมหลายคนจริง — เขียนเทสต์แล้ว (สร้างห้อง/join/start คนละ
-      instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
-      Redis/Docker ให้ใช้เลย (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` +
-      `docker compose up -d`) ควรรันจริงอย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่ — **นี่คือช่องว่างเดียวที่เหลือ
-      ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง) —
-      ลองทางเลือกอื่น (เขียน fake Redis server เองแบบพูด RESP protocol) แล้วแต่ตัดสินใจไม่ทำ เพราะจะพิสูจน์
-      แค่ว่าโค้ดปลอมทำงานถูก ไม่ได้พิสูจน์ atomicity ข้าม process จริงของ Redis ที่เทสต์นี้มีไว้ยืนยัน — ดู
-      [ADR-0006 Addendum 2](adr/0006-human-diplomacy-and-season-timer.md#addendum-2-รอบต่อมาในวันเดียวกัน-ทำไมไม่เขียน-fake-redis-server-เอง)
+  instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
+  Redis/Docker ให้ใช้เลย (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` +
+  `docker compose up -d`) ควรรันจริงอย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่ — **นี่คือช่องว่างเดียวที่เหลือ
+  ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง) —
+  ลองทางเลือกอื่น (เขียน fake Redis server เองแบบพูด RESP protocol) แล้วแต่ตัดสินใจไม่ทำ เพราะจะพิสูจน์
+  แค่ว่าโค้ดปลอมทำงานถูก ไม่ได้พิสูจน์ atomicity ข้าม process จริงของ Redis ที่เทสต์นี้มีไว้ยืนยัน — ดู
+  [ADR-0006 Addendum 2](adr/0006-human-diplomacy-and-season-timer.md#addendum-2-รอบต่อมาในวันเดียวกัน-ทำไมไม่เขียน-fake-redis-server-เอง)
 
 **เสร็จเมื่อ** 4 คนเล่นจนจบได้โดยไม่ desync และ reconnect กลางเกมได้ — เหลือจุดเดียว: ยืนยัน pub/sub ข้าม
 instance จริงกับ Redis จริง (ลีต้องรันเองด้วย Docker) ส่วนที่เหลือทั้งหมด (ห้องรอ, ฤดูพร้อมกัน, ตัวจับเวลา,
@@ -174,14 +174,18 @@ instance จริงกับ Redis จริง (ลีต้องรัน�
       เดิมตรง ๆ (ไม่พิมพ์ซ้ำ) พิสูจน์ว่า schema รองรับเนื้อหาจริงที่ผ่านบาลานซ์มาแล้ว วางเป็นบท 4 จาก 6
       (ต้นรัตนโกสินทร์ รัชกาลที่ 3–5) — **การจัดวางเป็นข้อเสนอเริ่มต้นของ Claude เอง ยังไม่ผ่านที่ปรึกษา
       ประวัติศาสตร์**
-- [~] **rewire เอนจิน — ทำชั้น setup แล้ว, ติดคำถามออกแบบสำหรับชั้นกลไก**: `createGame` (`state.ts`)
-      รับ `chapter?: ChapterDefinition` แล้ว อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพเริ่มต้น/กองรักษาเมืองหลวง/
-      รายชื่อมหาอำนาจต่างชาติจาก chapter จริง (ค่า default ยังพฤติกรรมเดิม 100% — 43 เทสต์ผ่านหมด — ดู
-      ADR-0007 Addendum 2) **พบข้อจำกัดสำคัญ (Addendum 3)**: `economy`/`turn`/`combat` มีกลไกเฉพาะบทนี้ฝัง
-      อยู่ในโค้ดจริง ไม่ใช่แค่ข้อมูลที่สลับได้ — perk effect (irrig/print/powder), เหตุการณ์ประจำฤดู
-      (น้ำท่วม/งานบุญ/ภัยแล้งผูกกับ terrain/building id ตรง ๆ), กลไกไผ่ลู่ลมระหว่างสองมหาอำนาจ (`lion`/
-      `eagle` ผูกตรงในโค้ดและใน type `Faction.powers`) — **รอคำตอบจากลี**ว่ากลไกแกนกลางเหมือนกันทุกบทหรือ
-      ต่างกันตามยุค ก่อนออกแบบระบบ effect ทั่วไปหรือจุดขยายต่อบทต่อไป
+- [~] **rewire เอนจิน — ทำชั้น setup + ระบบ effect ของ perk แล้ว, เหตุการณ์ประจำฤดู/กลไกสองมหาอำนาจยังไม่ทำ**:
+  `createGame` (`state.ts`) รับ `chapter?: ChapterDefinition` อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพ
+  เริ่มต้น/กองรักษาเมืองหลวง/รายชื่อมหาอำนาจต่างชาติจาก chapter จริง (ADR-0007 Addendum 2) **พบข้อจำกัด
+  สำคัญ (Addendum 3)**: `economy`/`turn`/`combat` มีกลไกเฉพาะบทนี้ฝังอยู่ในโค้ดจริง ไม่ใช่แค่ข้อมูลที่
+  สลับได้ — **ลีตัดสินใจแล้ว (Addendum 4): 6 บทใช้กลไกแกนกลางเดียวกัน แค่เปลี่ยนหน้าตา** → เริ่มระบบ
+  effect ทั่วไป: `PerkDefData.effects` ประกาศผลของ perk เป็นข้อมูล (`resourceMultiplier`/
+  `combatMultiplier`), `GameState.chapterId` + registry (`content/chapters/index.ts`) ให้
+  `computeIncome`/`checkPerks`/`resolveBattle` lookup เนื้อหาบทได้จริง (48 เทสต์ผ่านหมด รวม 5 เคสใหม่ที่
+  พิสูจน์ด้วย perk id ที่เอนจินไม่เคยรู้จักมาก่อนว่าไม่ได้ผูกกับ `irrig`/`powder`/`print` ตรง ๆ อีกแล้ว) —
+  **ยังไม่ทำ**: เหตุการณ์ประจำฤดู (น้ำท่วม/งานบุญ/ภัยแล้งผูกกับ terrain/building id ตรง ๆ) กับกลไก
+  ไผ่ลู่ลมระหว่างสองมหาอำนาจ (`lion`/`eagle` ผูกตรงในโค้ดและใน type `Faction.powers`) ยังไม่แปลงเป็นข้อมูล
+  — เป็นสไลซ์ถัดไปตามทิศทางเดียวกัน
 - [x] **ที่เก็บ Legacy ใน Supabase** — migration `supabase/migrations/20260921000000_chapter_legacy.sql`
       (`games.chapter_id` + ตาราง `player_legacy`) ทดสอบจริงกับ Postgres จริงผ่าน `@electric-sql/pglite`
       (WASM, ไม่ต้องมี Docker) — DDL/constraint/RLS/upsert ผ่านหมด ดู [ADR-0007](adr/0007-chapter-content-schema-and-legacy.md)

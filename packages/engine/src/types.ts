@@ -135,6 +135,8 @@ export interface ChronicleEntry {
 
 export interface GameState {
   schemaVersion: 1;
+  /** which ChapterDefinition (content/chapters/*) this game's content came from */
+  chapterId: string;
   seed: number;
   /** mulberry32 state — all randomness goes through this so the server can replay */
   rng: number;

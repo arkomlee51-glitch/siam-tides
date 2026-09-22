@@ -87,12 +87,12 @@ rewire ให้อ่านจาก `ChapterDefinition` จริง (ข้�
 
 ## Options Considered
 
-| ตัวเลือก | ทำไมไม่เลือก |
-| --- | --- |
-| Resource ID เป็น data-driven เต็มรูปแบบต่อบท | ต้องมี conversion table ข้ามบทสำหรับ Legacy ซับซ้อนเกินความคุ้มค่าของเกมขนาดนี้ |
-| Legacy bonus ผูกกับ building/perk id เฉพาะบท (เช่น "มีวัดในบทก่อน → +1 ศรัทธา") | ใช้ไม่ได้ข้ามบทที่ไม่มี building นั้น ต้องมี mapping ต่อคู่บทซึ่งจะยิ่งซับซ้อนขึ้นเรื่อย ๆ ทุกบทใหม่ที่เพิ่ม (O(n²)) |
-| Legacy ไม่มี cap ปล่อยให้สะสมอิสระ | เสี่ยง snowball ร้ายแรง — ผู้เล่นที่เก่งบทแรกจะแทบไม่แพ้บทหลัง ขัดกับที่ ROADMAP.md ระบุไว้ตั้งแต่ต้นว่า "มีเพดานกัน snowball" |
-| rewire เอนจินให้อ่าน `ChapterDefinition` ไปพร้อมกันเลยในรอบนี้ | ขนาดงานใหญ่เกินจะทำในรอบเดียวอย่างรอบคอบ เสี่ยงทำของที่ทำงานอยู่แล้ว (38 เทสต์, เกมที่เล่นได้จริงวันนี้) พัง — แยกเป็นงานถัดไปที่ตรวจสอบได้เป็นขั้น ๆ ดีกว่า |
+| ตัวเลือก                                                                        | ทำไมไม่เลือก                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Resource ID เป็น data-driven เต็มรูปแบบต่อบท                                    | ต้องมี conversion table ข้ามบทสำหรับ Legacy ซับซ้อนเกินความคุ้มค่าของเกมขนาดนี้                                                                              |
+| Legacy bonus ผูกกับ building/perk id เฉพาะบท (เช่น "มีวัดในบทก่อน → +1 ศรัทธา") | ใช้ไม่ได้ข้ามบทที่ไม่มี building นั้น ต้องมี mapping ต่อคู่บทซึ่งจะยิ่งซับซ้อนขึ้นเรื่อย ๆ ทุกบทใหม่ที่เพิ่ม (O(n²))                                         |
+| Legacy ไม่มี cap ปล่อยให้สะสมอิสระ                                              | เสี่ยง snowball ร้ายแรง — ผู้เล่นที่เก่งบทแรกจะแทบไม่แพ้บทหลัง ขัดกับที่ ROADMAP.md ระบุไว้ตั้งแต่ต้นว่า "มีเพดานกัน snowball"                               |
+| rewire เอนจินให้อ่าน `ChapterDefinition` ไปพร้อมกันเลยในรอบนี้                  | ขนาดงานใหญ่เกินจะทำในรอบเดียวอย่างรอบคอบ เสี่ยงทำของที่ทำงานอยู่แล้ว (38 เทสต์, เกมที่เล่นได้จริงวันนี้) พัง — แยกเป็นงานถัดไปที่ตรวจสอบได้เป็นขั้น ๆ ดีกว่า |
 
 ## Addendum (รอบต่อมาในวันเดียวกัน): เตรียมที่เก็บ Legacy ใน Supabase + วิธีทดสอบ migration โดยไม่ต้องมี Docker
 
@@ -179,14 +179,69 @@ multiplier}`, `SeasonalEventDef` ที่ประกาศเงื่อน�
 (Addendum 2) ยังมีประโยชน์ไม่ว่าคำตอบจะเป็นทางไหน เพราะชั้น "ตั้งค่าเริ่มต้น" เป็น data-driven ได้จริงไม่ว่า
 กรณีไหน
 
+## Addendum 4 (รอบต่อมา): ลีตัดสินใจแล้ว — เหมือนกันทุกบท แค่เปลี่ยนหน้าตา → เริ่มระบบ "effect" ทั่วไป
+
+ลีตอบคำถามใน Addendum 3 แล้ว: **6 บทใช้กลไกแกนกลางเดียวกัน แค่เปลี่ยนชื่อ/หน้าตา/ตัวเลข ไม่ใช่กลไกต่างกันจริง
+ตามยุค** — แปลว่าทางที่ถูกคือสร้าง **ระบบ effect ทั่วไปในเอนจินเดียว** (perk ประกาศ "ผล" เป็นข้อมูล ไม่ใช่
+สาขาโค้ดที่ผูกกับ perk id ตรง ๆ) ไม่ใช่จุดขยาย (hook) ให้แต่ละบทเสียบตรรกะของตัวเอง
+
+ทำสไลซ์แรกของระบบนี้แล้ว — **perk effects**:
+
+- `PerkDefData` (schema.ts) เพิ่มฟิลด์ `effects: readonly PerkEffect[]` โดย `PerkEffect` เป็น discriminated
+  union: `{kind:'resourceMultiplier', resource: CoreResourceId, multiplier: number}` กับ
+  `{kind:'combatMultiplier', multiplier: number}` — `data.ts`'s `PERKS` ประกาศ effect จริงของ 3 perk เดิม
+  (`irrig`→rice×1.2, `powder`→combat×1.2, `print`→know×1.3) เป็นข้อมูลแบบนี้แทนโค้ด
+- **`GameState` มีฟิลด์ใหม่ `chapterId: string`** — จุดที่ขาดไปก่อนหน้านี้: `createGame` เซ็ต `chapterId`
+  ตอนสร้างเกม แต่ไม่เคยเก็บไว้ใน state เลย ฟังก์ชัน pure อย่าง `computeIncome`/`checkPerks`/`resolveBattle`
+  เลยไม่มีทางรู้ว่าเกมนี้มาจากบทไหน — เพิ่ม registry เล็ก ๆ `content/chapters/index.ts` (`CHAPTERS`,
+  `getChapterById`) ให้ฟังก์ชันเหล่านี้ lookup เนื้อหาบทจาก `s.chapterId`/`ctx.s.chapterId` แทนการรับ
+  `ChapterDefinition` เป็นพารามิเตอร์เพิ่ม (คง signature เดิมไว้ ไม่กระทบ caller ใน `turn.ts`/`ai.ts`/
+  `actions.ts`/เว็บ) — เหตุผลที่เก็บแค่ `chapterId: string` ใน `GameState` แทนที่จะฝัง `ChapterDefinition`
+  ทั้งก้อน: ไม่อยากให้ snapshot ที่ส่งผ่านเครือข่ายหรือเก็บใน Supabase ทุกเทิร์นพองขึ้นเพราะแบก map/buildings/
+  perks ทั้งบทไปด้วย — same pattern ที่ `data.ts` เดิมไม่เคยฝังใน `GameState` เหมือนกัน
+- `economy.ts` เพิ่ม `resourceMultiplier(f, resource, chapter)` — คูณ effect ของทุก perk ที่ปลดล็อกแล้วที่
+  ตรงกับ resource นั้น (`kind:'resourceMultiplier'`) แทน `hasPerk(f,'irrig')?1.2:1`/`hasPerk(f,'print')`
+  เดิม — `computeIncome` เรียกใช้แทน — `checkPerks` เปลี่ยนมาวน `chapter.perks` (จาก registry) แทน `PERKS`
+  จาก `data.ts` ตรง ๆ ด้วย เพื่อให้ "perk ที่มีอยู่จริง" มาจากแหล่งเดียวกับ "ผลของ perk"
+- `combat.ts` เพิ่ม `combatMultiplier(f, chapter)` แทน `hasPerk(attF/defF,'powder')?1.2:1` เดิม —
+  `resolveBattle` เรียกใช้แทน — บรรทัด flavor text ที่เคย hardcode ชื่อ "วิทยาการดินปืน" กับ `×1.2` ตรง ๆ
+  ก็ทำให้ทั่วไปด้วย (พิมพ์ตัวคูณจริงที่คำนวณได้ ไม่ผูกกับชื่อ perk เฉพาะ)
+- เทสต์ใหม่ 5 เคสใน `content-schema.test.ts` พิสูจน์ตรง ๆ ว่าไม่ได้แอบผูกกับ literal string `'irrig'`/
+  `'powder'`/`'print'` อีกต่อไป — เคสสำคัญที่สุดคือสร้าง perk ที่เอนจินไม่เคยรู้จักชื่อเลย (`'monsoon-canals'`,
+  `'steel-hulls'`) แล้วพิสูจน์ว่า `resourceMultiplier`/`combatMultiplier` ยังใช้ effect data ได้ถูกต้อง
+
+**ขอบเขตที่ยังไม่ทำ (ตั้งใจหยุดตรงนี้)**:
+
+1. **Registry lookup ผูกกับ id ไม่ใช่ object ที่ส่งเข้า `createGame`** — `checkPerks`/`computeIncome`/
+   `resolveBattle` อ่านเนื้อหาบทจาก `getChapterById(s.chapterId)` (ของที่ลงทะเบียนไว้ใน `CHAPTERS`) ไม่ใช่
+   จาก `ChapterDefinition` object ที่ส่งเข้า `createGame({chapter: ...})` ตรง ๆ — ถ้า object ที่ส่งเข้ามามี
+   `manifest.id` เดียวกับที่ลงทะเบียนไว้แต่ `perks`/`rules` ต่างกัน ผลจริงตอนเล่นจะยึดตามของที่ลงทะเบียน ไม่ใช่
+   ของที่ส่งเข้ามา — ยังไม่กระทบอะไรตอนนี้เพราะมีแค่บทเดียวในระบบ จะเริ่มสำคัญเมื่อมีบทที่สองลงทะเบียนจริง
+2. **เหตุการณ์ประจำฤดู (`turn.ts`) กับกลไกสองมหาอำนาจ (bamboo diplomacy) ยังไม่แปลงเป็นข้อมูล** — ยัง
+   hardcode `buildings.includes('temple'/'granary')`, `terrainAt(...) === 'C'`, `f.powers.lion.patience`/
+   `f.powers.eagle.patience` เหมือนเดิมทุกอย่าง — Addendum 3 ระบุไว้แล้วว่าเป็นงานที่เหลือ ตอนนี้แค่ยืนยัน
+   ทิศทาง (ระบบ effect ทั่วไป ไม่ใช่ hook ต่อบท) แต่ยังไม่ได้ลงมือแปลงสองจุดนี้ — เป็นสไลซ์ถัดไป
+3. `ai.ts`/`powers.ts`/`endings.ts`/`actions.ts`/`views.ts`/`hex.ts`/`movement.ts` ยัง import จาก `data.ts`
+   ตรง ๆ เหมือนเดิม ไม่กระทบ
+4. `GameState.schemaVersion` ยังไม่ขยับจาก `1` แม้ `GameState` จะได้ฟิลด์บังคับใหม่ (`chapterId`) — โปรเจกต์
+   ยังไม่ปล่อยจริง ยังไม่มีระบบ migrate save เก่า ตั้งใจไม่ทำตอนนี้ (save/เกมค้างใน localStorage ของเครื่อง
+   dev ที่สร้างไว้ก่อนหน้านี้จะใช้ต่อไม่ได้ ต้องเริ่มเกมใหม่ — ยอมรับผลนี้เพราะยังไม่มีข้อมูลผู้เล่นจริง)
+
+ยืนยันด้วย: `npm run typecheck` ผ่านทั้ง engine/server/web, engine test suite 48 เคสผ่านหมด (43 เดิม + 5
+ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม เพราะ Redis), web 29 เคสผ่านหมด, `eslint .` และ
+`prettier --check` สะอาด, `npm run build -w @siam/engine` ผ่าน
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
   เป็น opt-in ยังไม่มีอะไรเรียกใช้จาก `createGame`/routes จริง
 - **ทำแล้วบางส่วน (Addendum 2)**: `createGame` อ่าน seats/starting rules/foreign powers จาก
-  `ChapterDefinition` แล้ว — **ยังไม่ทำ, ติดคำถามออกแบบ (Addendum 3)**: `economy`/`turn`/`combat` มีกลไก
-  เฉพาะบทนี้ฝังในโค้ดจริง (perk effect, เหตุการณ์ประจำฤดู, กลไกสองมหาอำนาจ) ไม่ใช่แค่ import `data.ts` ที่
-  สลับได้ตรง ๆ — รอคำตอบจากลีว่ากลไกแกนกลางเหมือนกันทุกบทหรือต่างกันตามยุค ก่อนออกแบบต่อ
+  `ChapterDefinition` แล้ว
+- **ทำแล้วบางส่วน (Addendum 4, ตามคำตอบลี — เหมือนกันทุกบทแค่เปลี่ยนหน้าตา)**: ระบบ effect ทั่วไปสำหรับ
+  perk — `economy.ts`'s `resourceMultiplier`/`combat.ts`'s `combatMultiplier` อ่าน `PerkEffect` data แทน
+  hardcode perk id, `GameState.chapterId` + registry (`content/chapters/index.ts`) ให้ฟังก์ชัน pure
+  lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: เหตุการณ์ประจำฤดูใน `turn.ts` กับกลไกสองมหาอำนาจ (bamboo
+  diplomacy) ยังฝังเป็นโค้ดเหมือนเดิม (perk ที่ทำไปคือสไลซ์แรกของทิศทางที่ตัดสินใจแล้ว ไม่ใช่ทั้งหมด)
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
   ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
   เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude
