@@ -122,7 +122,7 @@ export const fetchLobby = (code: string) => request<Lobby>(`/lobbies/${code}`, {
 export const joinLobby = (code: string, name?: string) =>
   request<Lobby>(`/lobbies/${code}/join`, { method: 'POST', body: JSON.stringify(name ? { name } : {}) });
 
-export const leaveLobby = (code: string) =>
-  request<null>(`/lobbies/${code}/leave`, { method: 'POST' });
+export const leaveLobby = (code: string) => request<null>(`/lobbies/${code}/leave`, { method: 'POST' });
 
-export const startLobby = (code: string) => request<CreatedGame>(`/lobbies/${code}/start`, { method: 'POST' });
+export const startLobby = (code: string) =>
+  request<CreatedGame>(`/lobbies/${code}/start`, { method: 'POST' });

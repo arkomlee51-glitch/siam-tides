@@ -55,16 +55,16 @@ server: ตรวจ Supabase JWT (JWKS หรือ HS256 secret, ดู ADR-00
 
 ## หน้าที่ของ Supabase และ Redis
 
-| เรื่อง                | Supabase                              | Redis                              |
-| ---------------------- | -------------------------------------- | ------------------------------------ |
-| ผู้ใช้/สิทธิ์          | Auth (anonymous + email), JWT, RLS    | —                                   |
-| state เกมที่กำลังเล่น | snapshot ต้นฤดู                        | state ล่าสุด (TTL หลังไม่มีคนเล่น) |
-| ประวัติคำสั่ง          | `game_actions` (ถาวร)                  | —                                   |
-| cold-start recovery    | snapshot ล่าสุด + replay action ที่เหลือ | —                                 |
-| กันชนกัน               | —                                      | lock ต่อเกม, idempotency key        |
-| realtime                | —                                      | pub/sub ข้าม instance               |
-| ห้องรอ/รหัสเชิญ        | `games.status = 'lobby'` (เฟส 5)      | รหัสเชิญ (TTL, เฟส 5)               |
-| rate limit              | —                                      | counter ต่อผู้ใช้                   |
+| เรื่อง                | Supabase                                 | Redis                              |
+| --------------------- | ---------------------------------------- | ---------------------------------- |
+| ผู้ใช้/สิทธิ์         | Auth (anonymous + email), JWT, RLS       | —                                  |
+| state เกมที่กำลังเล่น | snapshot ต้นฤดู                          | state ล่าสุด (TTL หลังไม่มีคนเล่น) |
+| ประวัติคำสั่ง         | `game_actions` (ถาวร)                    | —                                  |
+| cold-start recovery   | snapshot ล่าสุด + replay action ที่เหลือ | —                                  |
+| กันชนกัน              | —                                        | lock ต่อเกม, idempotency key       |
+| realtime              | —                                        | pub/sub ข้าม instance              |
+| ห้องรอ/รหัสเชิญ       | `games.status = 'lobby'` (เฟส 5)         | รหัสเชิญ (TTL, เฟส 5)              |
+| rate limit            | —                                        | counter ต่อผู้ใช้                  |
 
 ## Data model (เฟส 4 — ตามที่สร้างจริงใน `supabase/migrations/20260918000000_init_schema.sql`)
 

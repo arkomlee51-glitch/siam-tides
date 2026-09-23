@@ -41,5 +41,4 @@ export const lobbyNotFound = () => new AppError(404, 'LOBBY_NOT_FOUND', 'ไม�
 export const lobbyFull = () => new AppError(422, 'LOBBY_FULL', 'ห้องรอเต็มแล้ว (สูงสุด 4 คน)');
 export const lobbyStarted = (gameId: string) =>
   new AppError(409, 'LOBBY_STARTED', 'ห้องรอนี้เริ่มเกมไปแล้ว', { gameId });
-export const lobbyForbidden = () =>
-  new AppError(403, 'FORBIDDEN', 'เฉพาะเจ้าของห้องเท่านั้นที่เริ่มเกมได้');
+export const lobbyForbidden = () => new AppError(403, 'FORBIDDEN', 'เฉพาะเจ้าของห้องเท่านั้นที่เริ่มเกมได้');

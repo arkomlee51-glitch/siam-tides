@@ -35,7 +35,9 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
             <h2>สร้างห้องหรือใส่รหัสเชิญ</h2>
           </div>
         </div>
-        <p className="hint">ชวนเพื่อนได้สูงสุด {MAX_SEATS} คน แต่ละคนได้แคว้นของตัวเอง ที่นั่งที่เหลือเป็น AI</p>
+        <p className="hint">
+          ชวนเพื่อนได้สูงสุด {MAX_SEATS} คน แต่ละคนได้แคว้นของตัวเอง ที่นั่งที่เหลือเป็น AI
+        </p>
         <label className="acct-form">
           <span className="muted small">จำกัดเวลาต่อฤดู (นาที, 0 = ไม่จำกัด)</span>
           <input

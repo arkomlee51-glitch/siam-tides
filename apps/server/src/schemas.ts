@@ -78,4 +78,3 @@ export const JoinLobbyBody = z.object({
   name: z.string().trim().min(1).max(40).optional(),
 });
 export type JoinLobbyInput = z.infer<typeof JoinLobbyBody>;
-

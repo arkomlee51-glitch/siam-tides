@@ -223,9 +223,14 @@ export const useStore = create<Store>((set, get) => ({
     try {
       await ensureSession();
       const created = await createServerGame({ seed, name: MY_NAME });
-      enterServer(set, get, { gameId: created.gameId, factionId: created.factionId }, created.view, created.version, [
-        { kind: 'intro' },
-      ]);
+      enterServer(
+        set,
+        get,
+        { gameId: created.gameId, factionId: created.factionId },
+        created.view,
+        created.version,
+        [{ kind: 'intro' }],
+      );
     } catch (err) {
       set({ connection: 'offline' });
       get().showToast(
@@ -313,9 +318,14 @@ export const useStore = create<Store>((set, get) => ({
       const created = await startServerLobby(code);
       stopLobbyPolling();
       set({ lobby: null });
-      enterServer(set, get, { gameId: created.gameId, factionId: created.factionId }, created.view, created.version, [
-        { kind: 'intro' },
-      ]);
+      enterServer(
+        set,
+        get,
+        { gameId: created.gameId, factionId: created.factionId },
+        created.view,
+        created.version,
+        [{ kind: 'intro' }],
+      );
     } catch (err) {
       get().showToast(err instanceof ApiError ? err.message : 'เริ่มเกมไม่สำเร็จ');
     } finally {

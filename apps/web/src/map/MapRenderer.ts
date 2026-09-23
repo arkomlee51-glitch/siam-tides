@@ -1,14 +1,5 @@
 import { Application, Container, Graphics, Text } from 'pixi.js';
-import {
-  HEX_SIZE,
-  RIVER,
-  atWar,
-  cityAt,
-  faction,
-  hexCenter,
-  mapPixelBounds,
-  pixelToHex,
-} from '@siam/engine';
+import { HEX_SIZE, RIVER, atWar, cityAt, faction, hexCenter, mapPixelBounds, pixelToHex } from '@siam/engine';
 import type { FactionId, GameState } from '@siam/engine';
 import type { Palette } from '../theme';
 import {

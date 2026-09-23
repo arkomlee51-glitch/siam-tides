@@ -3,15 +3,7 @@ import { createMemoryDb } from './memory.js';
 import { createSupabaseDb } from './supabase.js';
 import type { Db } from './types.js';
 
-export type {
-  CreateGameInput,
-  Db,
-  DbActionEntry,
-  DbGame,
-  DbSeat,
-  DbSnapshot,
-  ReplayData,
-} from './types.js';
+export type { CreateGameInput, Db, DbActionEntry, DbGame, DbSeat, DbSnapshot, ReplayData } from './types.js';
 export { createMemoryDb } from './memory.js';
 export { createSupabaseDb } from './supabase.js';
 
