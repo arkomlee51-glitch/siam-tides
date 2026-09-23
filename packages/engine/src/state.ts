@@ -36,25 +36,29 @@ export interface CreateGameOptions {
    * chapter that ships today (`content/chapters/early-rattanakosin.ts`, itself derived
    * from `data.ts`).
    *
-   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7 + Addendum 4): state *setup* (seats, starting
+   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7 + Addendum 4-6): state *setup* (seats, starting
    * resources/stability/garrison, maxTurn, foreign-power roster) is chapter-driven, and
-   * so is the generic perk-effect system (`economy.ts`'s `resourceMultiplier`,
-   * `combat.ts`'s `combatMultiplier`, `checkPerks` all resolve chapter data by
-   * `GameState.chapterId` via `content/chapters/index.ts#getChapterById`, not by
-   * reading `data.ts` directly). Two things still don't follow this `chapter` param,
-   * though:
-   * (1) `checkPerks`/`computeIncome`/`resolveBattle` resolve chapter content from the
-   *     **registry**, keyed by `chapter.manifest.id` — NOT from the specific
-   *     `ChapterDefinition` object passed here. A caller that passes a `chapter` object
-   *     with the same `manifest.id` as a registered chapter but *different* `perks`/
-   *     `rules` gets setup from the object it passed, but gameplay functions will use
-   *     the registered chapter's data instead. Only relevant once a second chapter is
-   *     registered with a genuinely different id.
-   * (2) `turn.ts`'s seasonal events (temple/granary/flood-prone-terrain checks) and the
-   *     two-foreign-power "bamboo diplomacy" meter (`f.powers.lion`/`f.powers.eagle`)
-   *     are still hard-coded to those specific building/terrain/power ids — not yet
-   *     expressed as chapter data. `ai.ts`/`powers.ts`/`endings.ts`/`actions.ts`/
-   *     `views.ts`/`hex.ts`/`movement.ts` also still import from `data.ts` directly.
+   * so is essentially all gameplay logic now — `economy.ts` (`resourceMultiplier`,
+   * `checkPerks`), `combat.ts` (`combatMultiplier`), `turn.ts` (building-stability/
+   * disaster-mitigation effects, N-power "all patient" check, `internalAffairs`/
+   * `seasonalEvents` rules), `powers.ts` (bamboo-diplomacy demands/costs, now generic
+   * over however many foreign powers a chapter declares — not hard-coded to exactly
+   * two), `endings.ts`, `actions.ts`, `views.ts`, and the balance-rule half of `ai.ts`
+   * all resolve chapter data by `GameState.chapterId` via
+   * `content/chapters/index.ts#getChapterById`, not by reading `data.ts` directly. Two
+   * things still don't follow this `chapter` param, though:
+   * (1) Every function above resolves chapter content from the **registry**, keyed by
+   *     `chapter.manifest.id` — NOT from the specific `ChapterDefinition` object passed
+   *     here. A caller that passes a `chapter` object with the same `manifest.id` as a
+   *     registered chapter but *different* `perks`/`rules` gets setup from the object it
+   *     passed, but gameplay functions will use the registered chapter's data instead.
+   *     Only relevant once a second chapter is registered with a genuinely different id.
+   * (2) `hex.ts`/`movement.ts` (plus the terrain-movement-cost line inside `ai.ts`'s
+   *     `stepAlong`) still read `MAP`/`TERRAIN`/`RIVER` straight from `data.ts` as
+   *     module-level singletons, not per-chapter — deliberately deferred, see ADR-0007
+   *     Addendum 6 for why. `turn.ts`'s seasonal-event *structure* (which season
+   *     triggers what event, at what odds) is also still bespoke code, not yet a
+   *     `SeasonalEventDef` schema — deliberately deferred too, see Addendum 5/6.
    */
   chapter?: ChapterDefinition;
 }

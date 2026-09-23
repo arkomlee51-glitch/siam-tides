@@ -20,7 +20,7 @@ export {
   pairKey,
   visibleTo,
 } from './state.js';
-export type { CreateGameOptions, HumanSeatOptions } from './state.js';
+export type { Ctx, CreateGameOptions, HumanSeatOptions } from './state.js';
 export {
   cityYield,
   computeIncome,
@@ -33,9 +33,10 @@ export {
 export type { Income } from './economy.js';
 export { reachableTiles, attackTargets, pathTo } from './movement.js';
 export type { ReachTile } from './movement.js';
-export { evaluateEnding, endingProgress } from './endings.js';
+export { evaluateEnding, endingProgress, finishGame } from './endings.js';
 export type { EndingProgress } from './endings.js';
 export { offeringPower, choicesFor } from './powers.js';
+export { runAi } from './ai.js';
 export { buildingStabilityBonus, allPowersPatient, disasterMitigation } from './turn.js';
 export { applyAction, foundBlocker, ERROR_MESSAGES } from './actions.js';
 export { combatMultiplier } from './combat.js';

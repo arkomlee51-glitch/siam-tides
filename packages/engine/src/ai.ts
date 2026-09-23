@@ -1,4 +1,7 @@
-import { RULES, TERRAIN } from './data.js';
+// NOTE: TERRAIN stays imported straight from data.ts here (not chapter.terrain) for the
+// same reason as movement.ts/hex.ts — see docs/adr/0007 Addendum 6 "ขอบเขตที่ตั้งใจไม่ทำ".
+import { TERRAIN } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
 import { resolveBattle } from './combat.js';
 import { hexDistance, neighbors, terrainAt } from './hex.js';
 import { pathTo } from './movement.js';
@@ -56,6 +59,7 @@ function stepAlong(
 
 function actFaction(ctx: Ctx, ai: Faction): void {
   const s = ctx.s;
+  const chapter = getChapterById(s.chapterId);
   const S = seasonOf(s.turn);
   const cap = capitalOf(s, ai.id);
   if (!cap) {
@@ -72,12 +76,12 @@ function actFaction(ctx: Ctx, ai: Faction): void {
         owner: ai.id,
         c: cap.c,
         r: cap.r,
-        str: RULES.aiRecruitStr,
+        str: chapter.rules.aiRecruitStr,
         morale: 80,
         mp: 0,
         moved: false,
       });
-      ai.recruitCd = RULES.aiRecruitCooldown;
+      ai.recruitCd = chapter.rules.aiRecruitCooldown;
     }
     return;
   }
@@ -87,17 +91,17 @@ function actFaction(ctx: Ctx, ai: Faction): void {
     if (p) stepAlong(s, army, p, mp, false);
   };
   if (!enemies.length) {
-    army.str = Math.min(RULES.aiPeaceStrCap, army.str + 2);
+    army.str = Math.min(chapter.rules.aiPeaceStrCap, army.str + 2);
     army.morale = Math.min(95, army.morale + 5);
     goHome(1, 2);
     return;
   }
-  army.str = Math.min(RULES.aiWarStrCap, army.str + 1);
+  army.str = Math.min(chapter.rules.aiWarStrCap, army.str + 1);
   if (S.id === 'rain') {
     army.morale = Math.min(95, army.morale + 5);
     return;
   }
-  if (army.str < RULES.aiWeakStr) {
+  if (army.str < chapter.rules.aiWeakStr) {
     goHome(S.move, 1);
     return;
   }

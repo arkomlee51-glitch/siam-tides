@@ -5,6 +5,7 @@ import {
   ENDING_ORDER,
   ENDINGS,
   MAP,
+  NEW_CITY_NAMES,
   PERKS,
   POWERS,
   RESOURCES,
@@ -58,4 +59,5 @@ export const earlyRattanakosinChapter: ChapterDefinition = {
   endings: ENDINGS,
   endingOrder: ENDING_ORDER,
   seats: SEATS,
+  newCityNames: NEW_CITY_NAMES,
 };

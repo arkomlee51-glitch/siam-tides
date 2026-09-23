@@ -1,4 +1,5 @@
-import { BUILDINGS, COSTS, NEW_CITY_NAMES, RULES } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
+import type { ChapterDefinition } from './content/schema.js';
 import { resolveBattle } from './combat.js';
 import { canPay, pay, scaleCost } from './economy.js';
 import { hexDistance, isCoastal, key, terrainAt } from './hex.js';
@@ -57,11 +58,12 @@ function ownArmy(s: GameState, f: Faction, id: string): Army | ActionError {
 
 /** Why an army can't found a city here, or null if it can. */
 export function foundBlocker(s: GameState, a: Army): string | null {
+  const chapter = getChapterById(s.chapterId);
   const t = terrainAt(a.c, a.r);
   if (!t || t === 'M') return 'ตั้งเมืองบนเทือกเขาไม่ได้';
   if (cityAt(s, a.c, a.r)) return 'ช่องนี้มีเมืองอยู่แล้ว';
-  if (s.cities.some((c) => hexDistance([c.c, c.r], [a.c, a.r]) < RULES.cityMinDistance))
-    return `ต้องห่างจากเมืองอื่นอย่างน้อย ${RULES.cityMinDistance} ช่อง`;
+  if (s.cities.some((c) => hexDistance([c.c, c.r], [a.c, a.r]) < chapter.rules.cityMinDistance))
+    return `ต้องห่างจากเมืองอื่นอย่างน้อย ${chapter.rules.cityMinDistance} ช่อง`;
   return null;
 }
 
@@ -70,7 +72,12 @@ function aiTarget(s: GameState, target: FactionId): Faction | null {
   return t && t.kind === 'ai' && t.alive ? t : null;
 }
 
-type Handler<A extends Action> = (ctx: Ctx, f: Faction, a: A) => ActionError | null;
+type Handler<A extends Action> = (
+  ctx: Ctx,
+  f: Faction,
+  a: A,
+  chapter: ChapterDefinition,
+) => ActionError | null;
 type Handlers = { [K in Action['type']]: Handler<Extract<Action, { type: K }>> };
 
 const handlers: Handlers = {
@@ -110,15 +117,16 @@ const handlers: Handlers = {
     return null;
   },
 
-  found(ctx, f, a) {
+  found(ctx, f, a, chapter) {
     const s = ctx.s;
     const army = ownArmy(s, f, a.armyId);
     if (typeof army === 'string') return army;
     if (foundBlocker(s, army)) return 'INVALID_LOCATION';
-    const cost = scaleCost(COSTS.found, seasonOf(s.turn).build);
+    const cost = scaleCost(chapter.costs.found ?? {}, seasonOf(s.turn).build);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
-    const name = NEW_CITY_NAMES[s.cityNameIdx++ % NEW_CITY_NAMES.length]!;
+    const names = chapter.newCityNames;
+    const name = names[s.cityNameIdx++ % names.length]!;
     s.cities.push({
       id: newId(s, 'c'),
       name,
@@ -127,8 +135,8 @@ const handlers: Handlers = {
       owner: f.id,
       capital: false,
       buildings: [],
-      garrison: RULES.newCityGarrison,
-      baseGarrison: RULES.newCityBaseGarrison,
+      garrison: chapter.rules.newCityGarrison,
+      baseGarrison: chapter.rules.newCityBaseGarrison,
     });
     army.mp = 0;
     army.moved = true;
@@ -145,11 +153,11 @@ const handlers: Handlers = {
     return null;
   },
 
-  build(ctx, f, a) {
+  build(ctx, f, a, chapter) {
     const city = ctx.s.cities.find((c) => c.id === a.cityId);
     if (!city) return 'NOT_FOUND';
     if (city.owner !== f.id) return 'NOT_OWNER';
-    const def = BUILDINGS[a.building];
+    const def = chapter.buildings[a.building];
     if (!def) return 'INVALID_TARGET';
     if (city.buildings.includes(a.building)) return 'ALREADY_BUILT';
     if (def.coastalOnly && !isCoastal(city.c, city.r)) return 'NOT_COASTAL';
@@ -162,26 +170,26 @@ const handlers: Handlers = {
     return null;
   },
 
-  recruit(ctx, f, a) {
+  recruit(ctx, f, a, chapter) {
     const s = ctx.s;
     const city = s.cities.find((c) => c.id === a.cityId);
     if (!city) return 'NOT_FOUND';
     if (city.owner !== f.id) return 'NOT_OWNER';
     const here = armyAt(s, city.c, city.r);
-    if (here && here.str >= RULES.armyCap) return 'ARMY_FULL';
-    const cost = scaleCost(COSTS.recruit, seasonOf(s.turn).recruit);
+    if (here && here.str >= chapter.rules.armyCap) return 'ARMY_FULL';
+    const cost = scaleCost(chapter.costs.recruit ?? {}, seasonOf(s.turn).recruit);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
     if (here) {
-      here.str = Math.min(RULES.armyCap, here.str + RULES.recruitReinforce);
-      emit(ctx, [f.id], 'army', 'good', `เสริมกำลังทัพที่${city.name} +${RULES.recruitReinforce}`);
+      here.str = Math.min(chapter.rules.armyCap, here.str + chapter.rules.recruitReinforce);
+      emit(ctx, [f.id], 'army', 'good', `เสริมกำลังทัพที่${city.name} +${chapter.rules.recruitReinforce}`);
     } else {
       s.armies.push({
         id: newId(s, 'a'),
         owner: f.id,
         c: city.c,
         r: city.r,
-        str: RULES.recruitNew,
+        str: chapter.rules.recruitNew,
         morale: 70,
         mp: 0,
         moved: true,
@@ -191,22 +199,36 @@ const handlers: Handlers = {
     return null;
   },
 
-  tribute(ctx, f, a) {
-    return improveRelation(ctx, f, a.target, COSTS.tribute, RULES.tributeGain, 'ส่งบรรณาการ');
+  tribute(ctx, f, a, chapter) {
+    return improveRelation(
+      ctx,
+      f,
+      a.target,
+      chapter.costs.tribute ?? {},
+      chapter.rules.tributeGain,
+      'ส่งบรรณาการ',
+    );
   },
 
-  festival(ctx, f, a) {
-    return improveRelation(ctx, f, a.target, COSTS.festival, RULES.festivalGain, 'จัดงานบุญร่วมกับ');
+  festival(ctx, f, a, chapter) {
+    return improveRelation(
+      ctx,
+      f,
+      a.target,
+      chapter.costs.festival ?? {},
+      chapter.rules.festivalGain,
+      'จัดงานบุญร่วมกับ',
+    );
   },
 
-  annex(ctx, f, a) {
+  annex(ctx, f, a, chapter) {
     const s = ctx.s;
     const t = aiTarget(s, a.target);
     if (!t) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (rel.war) return 'AT_WAR';
-    if (rel.rel < RULES.annexThreshold) return 'RELATION_TOO_LOW';
-    const cost = scaleCost(COSTS.annex, seasonOf(s.turn).diplo);
+    if (rel.rel < chapter.rules.annexThreshold) return 'RELATION_TOO_LOW';
+    const cost = scaleCost(chapter.costs.annex ?? {}, seasonOf(s.turn).diplo);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
     for (const c of s.cities) if (c.owner === t.id) Object.assign(c, { owner: f.id, capital: false });
@@ -222,14 +244,14 @@ const handlers: Handlers = {
     return null;
   },
 
-  declareWar(ctx, f, a) {
+  declareWar(ctx, f, a, chapter) {
     const s = ctx.s;
     const t = s.factions[a.target];
     if (!t || !t.alive || t.id === f.id) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (rel.war) return 'AT_WAR';
     rel.war = true;
-    rel.rel = Math.min(rel.rel, RULES.warRelationCap);
+    rel.rel = Math.min(rel.rel, chapter.rules.warRelationCap);
     f.stability = clamp(f.stability - 5, 0, 100);
     for (const ai of aiFactions(s)) {
       if (ai.id === t.id) continue;
@@ -245,19 +267,19 @@ const handlers: Handlers = {
     return null;
   },
 
-  offerPeace(ctx, f, a) {
+  offerPeace(ctx, f, a, chapter) {
     const s = ctx.s;
     const t = aiTarget(s, a.target);
     // Human-to-human peace needs a proposal/accept flow (Phase 5).
     if (!t) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (!rel.war) return 'NOT_AT_WAR';
-    const cost = scaleCost(COSTS.peace, seasonOf(s.turn).diplo);
+    const cost = scaleCost(chapter.costs.peace ?? {}, seasonOf(s.turn).diplo);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
-    if (chance(s, RULES.peaceChance)) {
+    if (chance(s, chapter.rules.peaceChance)) {
       rel.war = false;
-      rel.rel = RULES.peaceRelation;
+      rel.rel = chapter.rules.peaceRelation;
       emit(ctx, [f.id], 'diplomacy', 'good', `🕊️ ${t.name}ยอมสงบศึก`);
       chronicle(s, f.id, `สงบศึกกับ${t.name}`);
     } else {
@@ -272,14 +294,16 @@ const handlers: Handlers = {
     if (!t || !t.alive || t.id === f.id || t.kind !== 'human') return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (!rel.war) return 'NOT_AT_WAR';
-    s.proposals = (s.proposals ?? []).filter((p) => !(p.from === f.id && p.to === t.id && p.kind === 'peace'));
+    s.proposals = (s.proposals ?? []).filter(
+      (p) => !(p.from === f.id && p.to === t.id && p.kind === 'peace'),
+    );
     s.proposals.push({ id: newId(s, 'pr'), kind: 'peace', from: f.id, to: t.id, turn: s.turn });
     emit(ctx, [t.id], 'diplomacy', 'info', `🕊️ ${f.name}เสนอสงบศึก รอคำตอบ`);
     chronicle(s, f.id, `เสนอสงบศึกกับ${t.name}`);
     return null;
   },
 
-  answerProposal(ctx, f, a) {
+  answerProposal(ctx, f, a, chapter) {
     const s = ctx.s;
     const proposals = s.proposals ?? [];
     const p = proposals.find((x) => x.id === a.proposalId && x.to === f.id);
@@ -291,7 +315,7 @@ const handlers: Handlers = {
       if (p.kind === 'peace') {
         const rel = relation(s, f.id, p.from);
         rel.war = false;
-        rel.rel = RULES.peaceRelation;
+        rel.rel = chapter.rules.peaceRelation;
         // a mutual proposal the other way (they also offered peace) is now moot — drop it too.
         s.proposals = s.proposals.filter(
           (x) => !((x.from === f.id && x.to === p.from) || (x.from === p.from && x.to === f.id)),
@@ -367,7 +391,8 @@ export function applyAction(state: GameState, factionId: FactionId, action: Acti
 
   const s = structuredClone(state);
   const ctx: Ctx = { s, ev: [] };
-  const err = handler(ctx, s.factions[factionId]!, action);
+  const chapter = getChapterById(s.chapterId);
+  const err = handler(ctx, s.factions[factionId]!, action, chapter);
   if (err) return fail(err);
   s.log.push(...ctx.ev);
   if (s.log.length > LOG_LIMIT) s.log.splice(0, s.log.length - LOG_LIMIT);

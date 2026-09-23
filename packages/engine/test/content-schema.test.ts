@@ -1,27 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CHAPTERS,
   CORE_RESOURCE_IDS,
   ChapterValidationError,
   LEGACY_CAPS,
   LEGACY_CATEGORIES,
   allPowersPatient,
   applyLegacyBonuses,
+  armiesOf,
   buildingStabilityBonus,
   combatMultiplier,
   computeIncome,
   computeLegacyBonuses,
   createGame,
+  describeDecision,
   disasterMitigation,
   earlyRattanakosinChapter,
+  finishGame,
   mergeLegacyBonuses,
   offeringPower,
+  reachableTiles,
   resourceMultiplier,
+  runAi,
+  scaleCost,
   validateChapterDefinition,
 } from '../src/index.js';
 import { seasonOf } from '../src/index.js';
 import { act } from './helpers.js';
 import type { BuildingId } from '../src/index.js';
-import type { ChapterDefinition, PerkDefData } from '../src/index.js';
+import type { ChapterDefinition, Ctx, PendingDecision, PerkDefData } from '../src/index.js';
 import type { PerkId, PowerId } from '../src/index.js';
 
 describe('content schema (เฟส 6)', () => {
@@ -403,5 +410,148 @@ describe('building/terrain effects and foreign-power generalization (ADR-0007 Ad
   it('offeringPower throws clearly for a chapter with no foreign powers rather than looping forever', () => {
     const noPowerChapter: ChapterDefinition = { ...earlyRattanakosinChapter, foreignPowers: {} };
     expect(() => offeringPower(noPowerChapter, 1)).toThrow(/no foreign powers/);
+  });
+});
+
+/**
+ * actions.ts/endings.ts/views.ts/ai.ts now resolve chapter content via
+ * `getChapterById(s.chapterId)` instead of importing data.ts directly (ADR-0007
+ * Addendum 6). These functions are registry-bound (they take `GameState`, not a
+ * `ChapterDefinition` parameter), so genericity here is proven by temporarily
+ * registering a second, deliberately different chapter under its own id — exactly
+ * how a real second chapter would be registered in `content/chapters/index.ts`.
+ */
+describe('actions/endings/views/ai resolve chapter data generically, not data.ts literals (ADR-0007 Addendum 6)', () => {
+  function withCustomChapter<T>(
+    overrides: Partial<ChapterDefinition>,
+    fn: (chapter: ChapterDefinition) => T,
+  ): T {
+    const chapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      manifest: { ...earlyRattanakosinChapter.manifest, id: `test-custom-${Math.random()}` },
+      ...overrides,
+    };
+    CHAPTERS[chapter.manifest.id] = chapter;
+    try {
+      return fn(chapter);
+    } finally {
+      delete CHAPTERS[chapter.manifest.id];
+    }
+  }
+
+  it('applyAction "found" draws the city name, cost, and garrison from chapter data, not data.ts', () => {
+    withCustomChapter(
+      {
+        newCityNames: ['เมืองทดสอบเอ', 'เมืองทดสอบบี'],
+        costs: { ...earlyRattanakosinChapter.costs, found: { wealth: 999 } },
+        rules: {
+          ...earlyRattanakosinChapter.rules,
+          cityMinDistance: 0,
+          newCityGarrison: 42,
+          newCityBaseGarrison: 7,
+        },
+      },
+      (chapter) => {
+        const s0 = createGame({ chapter, humans: [{ id: 'p1' }], seed: 1 });
+        s0.factions.p1!.res.wealth = 100000;
+        const before = s0.factions.p1!.res.wealth;
+        // the starting army sits on the capital's own tile — step off it first, since
+        // founding a city requires an empty tile (see actions.ts foundBlocker).
+        const startArmy = armiesOf(s0, 'p1')[0]!;
+        const dest = [...reachableTiles(s0, startArmy).values()][0]!;
+        const s1 = act(s0, 'p1', { type: 'move', armyId: startArmy.id, c: dest.c, r: dest.r });
+        const army = armiesOf(s1, 'p1')[0]!;
+        const after = act(s1, 'p1', { type: 'found', armyId: army.id });
+        const city = after.cities.find((c) => c.owner === 'p1' && !c.capital)!;
+        expect(chapter.newCityNames).toContain(city.name);
+        expect(city.garrison).toBe(42);
+        expect(city.baseGarrison).toBe(7);
+        const expectedCost = scaleCost(chapter.costs.found!, seasonOf(after.turn).build);
+        expect(after.factions.p1!.res.wealth).toBe(before - (expectedCost.wealth ?? 0));
+      },
+    );
+  });
+
+  it('applyAction "build" reads cost from chapter.buildings for the same building id, not data.ts BUILDINGS', () => {
+    withCustomChapter(
+      {
+        buildings: {
+          ...earlyRattanakosinChapter.buildings,
+          market: { ...earlyRattanakosinChapter.buildings['market']!, cost: { wealth: 777 } },
+        },
+      },
+      (chapter) => {
+        const s0 = createGame({ chapter, humans: [{ id: 'p1' }], seed: 2 });
+        s0.factions.p1!.res.wealth = 100000;
+        const before = s0.factions.p1!.res.wealth;
+        const capital = s0.cities.find((c) => c.owner === 'p1' && c.capital)!;
+        const after = act(s0, 'p1', { type: 'build', cityId: capital.id, building: 'market' as BuildingId });
+        expect(after.cities.find((c) => c.id === capital.id)!.buildings).toContain('market');
+        const expectedCost = scaleCost(chapter.buildings['market']!.cost, seasonOf(after.turn).build);
+        expect(after.factions.p1!.res.wealth).toBe(before - (expectedCost.wealth ?? 0));
+      },
+    );
+  });
+
+  it('runAi recruits a fallback army sized/cooled-down from chapter.rules, not data.ts RULES', () => {
+    withCustomChapter(
+      { rules: { ...earlyRattanakosinChapter.rules, aiRecruitStr: 5, aiRecruitCooldown: 3 } },
+      (chapter) => {
+        const s = createGame({ chapter, humans: [{ id: 'p1' }], seed: 3 });
+        const ai = Object.values(s.factions).find((f) => f.kind === 'ai' && f.alive)!;
+        s.armies = s.armies.filter((a) => a.owner !== ai.id);
+        ai.recruitCd = 1;
+        const ctx: Ctx = { s, ev: [] };
+        runAi(ctx);
+        const newArmy = s.armies.find((a) => a.owner === ai.id);
+        expect(newArmy?.str).toBe(5);
+        expect(ai.recruitCd).toBe(3);
+      },
+    );
+  });
+
+  it('describeDecision reads foreign-power/demand flavor from chapter data, not data.ts POWERS/DEMANDS', () => {
+    withCustomChapter(
+      {
+        foreignPowers: {
+          ...earlyRattanakosinChapter.foreignPowers,
+          lion: { ...earlyRattanakosinChapter.foreignPowers['lion']!, name: 'ราชสีห์ทดสอบ' },
+        },
+        demands: [{ title: 'ข้อเรียกร้องทดสอบ', text: 'ทดสอบ {P} ทดสอบ', accept: { wealth: 5, meter: 10 } }],
+      },
+      (chapter) => {
+        const s = createGame({ chapter, humans: [{ id: 'p1' }], seed: 4 });
+        const decision: PendingDecision = {
+          id: 'd1',
+          faction: 'p1',
+          power: 'lion',
+          kind: 'offer',
+          demand: 0,
+        };
+        const info = describeDecision(s, decision);
+        expect(info.powerName).toBe('ราชสีห์ทดสอบ');
+        expect(info.title).toBe('ข้อเรียกร้องทดสอบ');
+        expect(info.text).toBe('ทดสอบ ราชสีห์ทดสอบ ทดสอบ');
+      },
+    );
+  });
+
+  it("finishGame chronicles the chapter's own ending flavor text, not data.ts ENDINGS", () => {
+    withCustomChapter(
+      {
+        endings: {
+          ...earlyRattanakosinChapter.endings,
+          ashes: { ...earlyRattanakosinChapter.endings['ashes']!, name: 'เถ้าถ่านทดสอบ' },
+        },
+      },
+      (chapter) => {
+        const s = createGame({ chapter, humans: [{ id: 'p1' }], seed: 5 });
+        s.factions.p1!.alive = false; // forces the 'ashes' ending deterministically
+        const ctx: Ctx = { s, ev: [] };
+        finishGame(ctx);
+        expect(s.factions.p1!.ending).toBe('ashes');
+        expect(s.chronicle.some((e) => e.text.includes('เถ้าถ่านทดสอบ'))).toBe(true);
+      },
+    );
   });
 });

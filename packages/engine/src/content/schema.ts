@@ -213,6 +213,8 @@ export interface ChapterDefinition {
   endingOrder: readonly string[];
   /** join order = seat order; humans fill seats first, the rest are AI */
   seats: readonly SeatDefData[];
+  /** name pool `found` draws from, cycling in order (see actions.ts) */
+  newCityNames: readonly string[];
 }
 
 export class ChapterValidationError extends Error {
@@ -274,6 +276,8 @@ export function validateChapterDefinition(def: ChapterDefinition): void {
   for (const e of def.endingOrder ?? []) {
     if (!endingIds.has(e)) issues.push(`endingOrder references unknown ending '${e}'`);
   }
+
+  if (!def.newCityNames?.length) issues.push('newCityNames must have at least one entry');
 
   if (!def.seats?.length) issues.push('seats must have at least one entry');
   def.seats?.forEach((seat, i) => {

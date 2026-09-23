@@ -282,6 +282,68 @@ foreignPowers)`) — สำหรับบทที่ชิปวันนี�
 ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint .` และ `prettier --check` สะอาด,
 `npm run build -w @siam/engine` ผ่าน
 
+## Addendum 6 (รอบต่อมา): endings/actions/views + ครึ่งหนึ่งของ ai.ts อ่านจาก chapter — และเหตุผลที่หยุดก่อนแตะ hex.ts/movement.ts
+
+ต่อจาก Addendum 5 — ตรวจไฟล์ที่เหลือทั้งหมดที่ยัง `import ... from './data.js'` ตรง ๆ (`ai.ts`/`endings.ts`/
+`actions.ts`/`views.ts`/`hex.ts`/`movement.ts`) ทีละไฟล์ เพื่อแยกว่าไฟล์ไหนเป็นกลไกที่ผูกกับเนื้อหา (ต้องรื้อ)
+กับไฟล์ไหนเป็น chassis/เรขาคณิตล้วน ๆ:
+
+- **`ChapterDefinition` เพิ่มฟิลด์ `newCityNames: readonly string[]`** (พร้อม validation ว่าต้องมีอย่างน้อย 1
+  ชื่อ) — พอร์ต `NEW_CITY_NAMES` จาก `data.ts` เข้า `early-rattanakosin.ts` แบบเดียวกับฟิลด์อื่น เป็นช่องว่าง
+  schema จริงที่เพิ่งเจอตอนรื้อ `found` handler (พูลชื่อเมืองใหม่ไม่เคยอยู่ใน schema เลยตั้งแต่ Addendum 1)
+- **`endings.ts`** — `evaluateEnding`/`finishGame` อ่าน `chapter.endings`/`chapter.rules.extremeLimit`/
+  `chapter.rules.balancedZone` แทน `ENDINGS`/`RULES` — แต่จงใจ**ไม่แตะ**โครงสร้างการตัดสินตอนจบ (`EndingId`
+  6 ค่า, ลำดับเงื่อนไข, เกณฑ์ตัวเลข) เพราะตรงกับคำตอบของลีใน Addendum 4 ("เหมือนกันทุกบทแค่เปลี่ยนหน้าตา")
+  ที่สุด: `EndingId` เป็น literal union คงที่แบบเดียวกับ `CoreResourceId` — ตอนจบ 6 แบบกับกลไกตัดสินเป็น
+  chassis ของทุกบท มีแค่ชื่อ/ไอคอน/ข้อความที่เปลี่ยนต่อบท ซึ่ง `chapter.endings[id]` ให้อยู่แล้ว
+- **`actions.ts` ทั้งไฟล์** — `BUILDINGS`/`COSTS`/`NEW_CITY_NAMES`/`RULES` เปลี่ยนเป็น `chapter.buildings`/
+  `chapter.costs`/`chapter.newCityNames`/`chapter.rules` — `Handler<A>` ได้พารามิเตอร์ตัวที่ 4
+  `chapter: ChapterDefinition` และ `applyAction` resolve `getChapterById(s.chapterId)` ครั้งเดียวก่อนเรียก
+  handler (handler ที่ไม่ใช้ chapter อย่าง `move`/`attack`/`camp`/`envoy`/`answerDecision`/`endTurn` ไม่ต้อง
+  แก้ signature — TypeScript ยอมให้ฟังก์ชันที่รับพารามิเตอร์น้อยกว่าเข้ากับ type ที่มีพารามิเตอร์มากกว่า)
+  signature สาธารณะของ `applyAction`/`foundBlocker` ไม่เปลี่ยน จึงไม่กระทบ server/web
+- **`views.ts`** — `describeDecision` อ่าน `chapter.foreignPowers`/`chapter.demands`/`chapter.costs.ultimatum`
+  แทน `POWERS`/`DEMANDS`/`COSTS`
+- **`ai.ts` ครึ่งเดียวโดยตั้งใจ** — `RULES.aiRecruitStr`/`aiRecruitCooldown`/`aiPeaceStrCap`/`aiWarStrCap`/
+  `aiWeakStr` เป็น `chapter.rules.*` แล้ว แต่บรรทัดค่าเดินใน `stepAlong` (`TERRAIN[terrainAt(...)].cost`)
+  ยัง import `TERRAIN` จาก `data.ts` ตรง ๆ — เป็นโค้ดตัวเดียวกับที่ `movement.ts` ใช้ จึงผูกกับการตัดสินใจ
+  เรื่อง hex.ts/movement.ts ด้านล่าง (มีคอมเมนต์ชี้มาที่ addendum นี้ในไฟล์)
+
+**ตัดสินใจไม่ทำ (ไม่ใช่แค่ยังไม่ได้ทำ): `hex.ts`/`movement.ts`** — ต่างจากไฟล์อื่นโดยพื้นฐาน ด้วยเหตุผล 4 ข้อ:
+
+1. **`hex.ts` คำนวณ `ROWS`/`COLS`/`riverSet` เป็น module-level singleton ตอน import** (จาก `MAP`/`RIVER`)
+   ไม่ใช่ค่าที่คำนวณต่อ call — ทำให้ทั่วไปต้องเปลี่ยนแทบทุกฟังก์ชันเรขาคณิต (`tileAt`/`terrainAt`/
+   `neighbors`/`hexCenter`/`pixelToHex`/`tilesWithin` ฯลฯ) ให้รับแผนที่เป็นพารามิเตอร์
+2. **ใช้กว้างกว่าเอนจิน** — `apps/web/src/map/MapRenderer.ts`/`geometry.ts` เรียก `hex.ts` ตรง ๆ เพื่อวาด
+   แผนที่โดยไม่ผ่าน `GameState` การรื้อจะลามไปทั้งสอง package
+3. **เซิร์ฟเวอร์ถือหลายเกมพร้อมกันในโปรเซสเดียว** — ถ้าเปลี่ยน singleton เป็น state ต่อบท ต้องกันไม่ให้สอง
+   เกมที่ใช้บทต่างกันพร้อมกันชนกัน เป็นความเสี่ยงด้านความถูกต้องที่ไฟล์อื่นไม่มี (ไฟล์อื่นรับ `chapter` ต่อ
+   call อยู่แล้ว)
+4. **ยังไม่รู้ว่าบทอื่นจะมีแผนที่ของตัวเองจริงไหม** — เป็นไปได้ที่ 6 บทใช้ภูมิศาสตร์ลุ่มน้ำเดียวกันต่างยุค
+   และความต่างเชิงกลไกทั้งหมดมาจาก `chapter.terrain`/`chapter.buildings` ที่เป็นข้อมูลแล้ว โดยไม่ต้องมีแผนที่
+   hex ต่างกันเลย — รื้อตอนนี้เสี่ยงเดาโครงสร้างผิด เหตุผลเดียวกับที่เลื่อน `SeasonalEventDef` ใน Addendum 5
+   (รอเนื้อหาบทจริงอย่างน้อยอีกหนึ่งบท)
+
+**เทสต์ใหม่ 5 เคส**ใน `content-schema.test.ts` — ฟังก์ชันกลุ่มนี้รับ `GameState` ไม่ใช่ `ChapterDefinition`
+จึงพิสูจน์ความเป็นระบบทั่วไปด้วยการลงทะเบียนบททดสอบชั่วคราวใน `CHAPTERS` แล้วถอดออกใน `finally`
+(จำลองวิธีลงทะเบียนบทที่สองจริง):
+
+- `found` ใช้ชื่อเมือง/ต้นทุน/กองรักษาการณ์จาก `chapter.newCityNames`/`chapter.costs.found`/
+  `chapter.rules.newCityGarrison` (ชื่อเมืองที่ไม่มีในรายการจริงเลย, ต้นทุนเทียบกับ `scaleCost` ตามฤดูจริง)
+- `build` ใช้ต้นทุนจาก `chapter.buildings.market.cost` — id เดิมแต่ค่าต่างกัน เพราะ `BuildingId` ยังเป็น
+  literal union คงที่ (แบบเดียวกับ `EndingId`/`PowerId`) คิด id ใหม่จะไม่ผ่าน TypeScript
+- `runAi` เกณฑ์ทัพสำรองด้วย `chapter.rules.aiRecruitStr`/`aiRecruitCooldown`
+- `describeDecision` ใช้ชื่อมหาอำนาจ/ข้อเรียกร้องจาก `chapter.foreignPowers`/`chapter.demands`
+- `finishGame` บันทึก chronicle ด้วยชื่อตอนจบจาก `chapter.endings`
+
+export เพิ่มจาก `index.ts` ให้เทสต์เรียกตรงได้: `runAi`, `finishGame` และ type `Ctx` (แบบเดียวกับที่ export
+`buildingStabilityBonus` ฯลฯ ใน Addendum 5) — และแก้คอมเมนต์ `CreateGameOptions.chapter` ใน `state.ts` ที่
+ล้าสมัยมาตั้งแต่ Addendum 5 (ยังบอกว่า `powers.ts`/อาคาร/ภูมิประเทศ hardcode อยู่) ให้ตรงกับสถานะจริง
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, engine 63 เคสผ่านหมด (58 เดิม + 5 ใหม่), server
+63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint` ทั้ง src ของสาม package สะอาด, `prettier --check`
+สะอาด
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
@@ -295,6 +357,10 @@ foreignPowers)`) — สำหรับบทที่ชิปวันนี�
   (`content/chapters/index.ts`) ให้ฟังก์ชัน pure lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: โครงสร้างเหตุการณ์
   ประจำฤดูเอง (ฤดูไหนเกิดอะไร, โอกาสเกิด, ข้อความ) ยังฝังเป็นโค้ดใน `turn.ts`'s `seasonalEvents` เหมือนเดิม
   — ตั้งใจรอเนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ schema นี้ (ดู Addendum 5)
+- **ทำแล้ว (Addendum 6)**: `endings.ts`/`actions.ts`/`views.ts` และส่วน balance rules ของ `ai.ts` อ่านจาก
+  chapter แล้ว + ฟิลด์ใหม่ `newCityNames` — **ตัดสินใจไม่ทำตอนนี้**: `hex.ts`/`movement.ts` (และบรรทัดค่าเดินใน
+  `ai.ts`) ยังอ่าน `MAP`/`TERRAIN`/`RIVER` จาก `data.ts` เป็น singleton เพราะกระทบ renderer ของเว็บ, เสี่ยงชนกัน
+  ระหว่างหลายเกมบนเซิร์ฟเวอร์ และยังไม่รู้ว่าบทอื่นจะมีแผนที่ของตัวเองจริงไหม (ดู Addendum 6)
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
   ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
   เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude
