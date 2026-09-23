@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { ENDINGS, SEASONS, describeDecision, seasonLabel, seasonOf, yearOf } from '@siam/engine';
+import { describeDecision, seasonLabel, seasonOf, yearOf } from '@siam/engine';
 import type { GameEvent } from '@siam/engine';
 import { ME, useStore } from '../store';
+import { chapterOf } from './format';
 import { AccountPanel } from './Account';
 import { LobbyPanel } from './Lobby';
 
@@ -119,7 +120,7 @@ export function Modals() {
     );
 
   if (modal.kind === 'season') {
-    const season = SEASONS[(modal.turn - 1) % 3]!;
+    const season = seasonOf(modal.turn);
     return (
       <Shell onClose={closeModal}>
         <div className="mhead">
@@ -215,7 +216,7 @@ export function Modals() {
   }
 
   const me = state.factions[ME]!;
-  const ending = ENDINGS[me.ending ?? 'survive'];
+  const ending = chapterOf(state).endings[me.ending ?? 'survive']!;
   const cities = state.cities.filter((c) => c.owner === ME).length;
   return (
     <Shell>

@@ -7,6 +7,7 @@ import {
   computeIncome,
   createGame,
   evaluateEnding,
+  getChapterById,
   reachableTiles,
   relation,
   viewFor,
@@ -74,7 +75,13 @@ describe('determinism', () => {
 describe('economy', () => {
   it('capital yield matches the prototype', () => {
     const s = createGame({ seed: 1 });
-    expect(cityYield(capitalOf(s, 'p1')!)).toEqual({ rice: 20, man: 8, wealth: 8, faith: 2, know: 1 });
+    expect(cityYield(capitalOf(s, 'p1')!, getChapterById(s.chapterId))).toEqual({
+      rice: 20,
+      man: 8,
+      wealth: 8,
+      faith: 2,
+      know: 1,
+    });
   });
 
   it('seasons scale income; cool season is the harvest', () => {

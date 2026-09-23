@@ -1,9 +1,11 @@
-import { PERKS } from '@siam/engine';
+import { getChapterById } from '@siam/engine';
+import type { PerkId } from '@siam/engine';
 import { ME, useStore } from '../store';
 
 export function Meters() {
   const me = useStore((s) => s.state.factions[ME]!);
-  const next = PERKS.find((p) => !me.perks.includes(p.id));
+  const perks = getChapterById(useStore((s) => s.state.chapterId)).perks;
+  const next = perks.find((p) => !me.perks.includes(p.id as PerkId));
   const bar = (label: string, value: number, bad: boolean) => (
     <div className="mrow" key={label}>
       <span>{label}</span>
@@ -25,7 +27,7 @@ export function Meters() {
         <div className="perks">
           {me.perks.map((id) => (
             <span className="tag" key={id}>
-              {PERKS.find((p) => p.id === id)!.name}
+              {perks.find((p) => p.id === id)?.name ?? id}
             </span>
           ))}
         </div>

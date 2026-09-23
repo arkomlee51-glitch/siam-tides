@@ -1,10 +1,14 @@
-import { ENDINGS, RULES, endingProgress } from '@siam/engine';
+import { endingProgress } from '@siam/engine';
+import type { EndingId } from '@siam/engine';
 import { ME, useStore } from '../store';
+import { chapterOf } from './format';
 
 export function GoalsTab() {
   const state = useStore((s) => s.state);
   const me = state.factions[ME]!;
   const p = endingProgress(state, me);
+  const chapter = chapterOf(state);
+  const R = chapter.rules;
 
   const item = (cls: string, text: string) => (
     <li className={cls} key={text}>
@@ -12,11 +16,11 @@ export function GoalsTab() {
     </li>
   );
   const ok = (b: boolean) => (b ? 'ok' : '');
-  const card = (id: keyof typeof ENDINGS, items: React.ReactNode[]) => (
+  const card = (id: EndingId, items: React.ReactNode[]) => (
     <div className="card" key={id}>
       <div className="ch">
-        <span style={{ fontSize: 20 }}>{ENDINGS[id].icon}</span>
-        <h3>{ENDINGS[id].name}</h3>
+        <span style={{ fontSize: 20 }}>{chapter.endings[id]!.icon}</span>
+        <h3>{chapter.endings[id]!.name}</h3>
       </div>
       <ul className="goals">{items}</ul>
     </div>
@@ -34,8 +38,8 @@ export function GoalsTab() {
           `เอกราช ${p.shadow.sovereignty} (ต่ำกว่า 40 = เข้าเงื่อนไข)`,
         ),
         item(
-          p.shadow.extremeTurns >= RULES.extremeLimit ? 'hit' : '',
-          `เอียงสุดขั้ว ${p.shadow.extremeTurns} จาก ${RULES.extremeLimit} ฤดู`,
+          p.shadow.extremeTurns >= R.extremeLimit ? 'hit' : '',
+          `เอียงสุดขั้ว ${p.shadow.extremeTurns} จาก ${R.extremeLimit} ฤดู`,
         ),
       ])}
       {card('empire', [
@@ -47,7 +51,10 @@ export function GoalsTab() {
       ])}
       {card('river', [
         item(ok(p.river.sovereignty >= 80), `เอกราช ${p.river.sovereignty} จาก 80`),
-        item(ok(Math.abs(p.river.meter) <= RULES.balancedZone), `แถบไผ่ ${p.river.meter} (อยู่ในช่วง ±25)`),
+        item(
+          ok(Math.abs(p.river.meter) <= R.balancedZone),
+          `แถบไผ่ ${p.river.meter} (อยู่ในช่วง ±${R.balancedZone})`,
+        ),
         item(ok(p.river.cities >= 3), `ครองเมือง ${p.river.cities} จาก 3`),
         item(ok(p.river.wealth >= 100), `ทรัพย์ ${p.river.wealth} จาก 100`),
       ])}

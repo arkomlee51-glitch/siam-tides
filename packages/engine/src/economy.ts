@@ -1,4 +1,4 @@
-import { BUILDINGS, RESOURCE_IDS, RULES, TERRAIN } from './data.js';
+import { RESOURCE_IDS } from './data.js';
 import { getChapterById } from './content/chapters/index.js';
 import type { ChapterDefinition, CoreResourceId } from './content/schema.js';
 import { isCoastal, isRiver, neighbors, terrainAt } from './hex.js';
@@ -11,23 +11,31 @@ function addInto(target: Resources, src: Partial<Resources>): void {
   for (const k of RESOURCE_IDS) target[k] += src[k] ?? 0;
 }
 
-/** Per-season yield of a city before seasonal modifiers. */
-export function cityYield(city: City): Resources {
-  const y: Resources = { ...RULES.cityBaseYield };
+/**
+ * Per-season yield of a city before seasonal modifiers, from the given chapter's
+ * terrain/building/rule data (docs/adr/0007 Addendum 7). Callers holding a
+ * `GameState` pass `getChapterById(s.chapterId)`.
+ */
+export function cityYield(city: City, chapter: ChapterDefinition): Resources {
+  const R = chapter.rules;
+  const y: Resources = { ...R.cityBaseYield };
   for (const [c, r] of [[city.c, city.r] as [number, number], ...neighbors(city.c, city.r)]) {
     const t = terrainAt(c, r);
-    if (t) addInto(y, TERRAIN[t].yield);
-    if (isRiver(c, r)) addInto(y, RULES.riverBonus);
+    if (t) addInto(y, chapter.terrain[t]?.yield ?? {});
+    if (isRiver(c, r)) addInto(y, R.riverBonus);
   }
-  if (isCoastal(city.c, city.r)) y.wealth += RULES.coastalWealth;
-  for (const b of city.buildings) addInto(y, BUILDINGS[b].yield);
+  if (isCoastal(city.c, city.r)) y.wealth += R.coastalWealth;
+  for (const b of city.buildings) addInto(y, chapter.buildings[b]?.yield ?? {});
   for (const k of RESOURCE_IDS) y[k] = Math.round(y[k]);
   return y;
 }
 
 export const hasPerk = (f: Faction, id: PerkId): boolean => f.perks.includes(id);
 export const upkeepOf = (s: GameState, fid: FactionId): number =>
-  armiesOf(s, fid).reduce((sum, a) => sum + Math.ceil(a.str / RULES.upkeepPerStr), 0);
+  armiesOf(s, fid).reduce(
+    (sum, a) => sum + Math.ceil(a.str / getChapterById(s.chapterId).rules.upkeepPerStr),
+    0,
+  );
 
 /**
  * Combined multiplier a faction's unlocked perks apply to one core resource, generic
@@ -54,7 +62,7 @@ export function computeIncome(s: GameState, f: Faction): Income {
   const chapter = getChapterById(s.chapterId);
   const S = seasonOf(s.turn);
   const inc = zero();
-  for (const city of citiesOf(s, f.id)) addInto(inc, cityYield(city));
+  for (const city of citiesOf(s, f.id)) addInto(inc, cityYield(city, chapter));
   inc.rice *= S.rice * resourceMultiplier(f, 'rice', chapter);
   inc.man *= S.man;
   inc.know *= resourceMultiplier(f, 'know', chapter);

@@ -1,6 +1,7 @@
-import { COSTS, RULES, aiFactions, canPay, relation, seasonOf } from '@siam/engine';
+import { aiFactions, canPay, relation, seasonOf } from '@siam/engine';
+import type { Cost } from '@siam/engine';
 import { ME, useStore } from '../store';
-import { costText, seasonalCostOf } from './format';
+import { chapterOf, costText as costTextIn, seasonalCostOf } from './format';
 
 export function DiplomacyTab() {
   const state = useStore((s) => s.state);
@@ -10,11 +11,17 @@ export function DiplomacyTab() {
   const diplo = seasonOf(state.turn).diplo;
   const alive = aiFactions(state);
   const dead = state.order.map((id) => state.factions[id]!).filter((f) => f.kind === 'ai' && !f.alive);
-  const otherHumans = state.order.map((id) => state.factions[id]!).filter((f) => f.kind === 'human' && f.id !== ME);
+  const otherHumans = state.order
+    .map((id) => state.factions[id]!)
+    .filter((f) => f.kind === 'human' && f.id !== ME);
   const aliveHumans = otherHumans.filter((f) => f.alive);
   const deadHumans = otherHumans.filter((f) => !f.alive);
 
-  const cost = (base: Parameters<typeof costText>[0]) => seasonalCostOf(state, base, 'diplo');
+  const chapter = chapterOf(state);
+  const R = chapter.rules;
+  const costs = chapter.costs;
+  const costText = (c: Cost) => costTextIn(c, chapter);
+  const cost = (base: Cost | undefined) => seasonalCostOf(state, base ?? {}, 'diplo');
 
   return (
     <>
@@ -23,8 +30,12 @@ export function DiplomacyTab() {
           <p className="muted small">ผู้เล่นคนอื่น — สงบศึกต้องให้อีกฝ่ายตอบรับเอง ไม่ใช่จ่ายเงินซื้อ</p>
           {aliveHumans.map((f) => {
             const rel = relation(state, f.id, ME);
-            const outgoing = state.proposals.find((p) => p.from === ME && p.to === f.id && p.kind === 'peace');
-            const incoming = state.proposals.find((p) => p.from === f.id && p.to === ME && p.kind === 'peace');
+            const outgoing = state.proposals.find(
+              (p) => p.from === ME && p.to === f.id && p.kind === 'peace',
+            );
+            const incoming = state.proposals.find(
+              (p) => p.from === f.id && p.to === ME && p.kind === 'peace',
+            );
             return (
               <div className="card" key={f.id}>
                 <div className="ch">
@@ -35,7 +46,7 @@ export function DiplomacyTab() {
                 <div className="rel">
                   <div className="track" title="ขีดจางคือระดับที่ผนวกได้">
                     <i style={{ left: `${(rel.rel + 100) / 2}%` }} />
-                    <em style={{ left: `${(RULES.annexThreshold + 100) / 2}%` }} />
+                    <em style={{ left: `${(R.annexThreshold + 100) / 2}%` }} />
                   </div>
                   <span>{rel.rel}</span>
                 </div>
@@ -46,13 +57,17 @@ export function DiplomacyTab() {
                         <p className="muted small">{f.name}เสนอสงบศึกกับคุณ</p>
                         <button
                           className="btn good"
-                          onClick={() => dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: true })}
+                          onClick={() =>
+                            dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: true })
+                          }
                         >
                           🕊️ ยอมรับ
                         </button>
                         <button
                           className="btn"
-                          onClick={() => dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: false })}
+                          onClick={() =>
+                            dispatch({ type: 'answerProposal', proposalId: incoming.id, accept: false })
+                          }
                         >
                           ปฏิเสธ
                         </button>
@@ -62,7 +77,10 @@ export function DiplomacyTab() {
                         🕊️ เสนอสงบศึกแล้ว รอคำตอบจาก{f.name}
                       </button>
                     ) : (
-                      <button className="btn" onClick={() => dispatch({ type: 'proposePeace', target: f.id })}>
+                      <button
+                        className="btn"
+                        onClick={() => dispatch({ type: 'proposePeace', target: f.id })}
+                      >
                         🕊️ เสนอสงบศึก
                       </button>
                     )
@@ -95,10 +113,10 @@ export function DiplomacyTab() {
       </p>
       {alive.map((f) => {
         const rel = relation(state, f.id, ME);
-        const tribute = cost(COSTS.tribute);
-        const festival = cost(COSTS.festival);
-        const annex = cost(COSTS.annex);
-        const peace = cost(COSTS.peace);
+        const tribute = cost(costs.tribute);
+        const festival = cost(costs.festival);
+        const annex = cost(costs.annex);
+        const peace = cost(costs.peace);
         return (
           <div className="card" key={f.id}>
             <div className="ch">
@@ -109,7 +127,7 @@ export function DiplomacyTab() {
             <div className="rel">
               <div className="track" title="ขีดจางคือระดับที่ผนวกได้">
                 <i style={{ left: `${(rel.rel + 100) / 2}%` }} />
-                <em style={{ left: `${(RULES.annexThreshold + 100) / 2}%` }} />
+                <em style={{ left: `${(R.annexThreshold + 100) / 2}%` }} />
               </div>
               <span>{rel.rel}</span>
             </div>
@@ -131,7 +149,7 @@ export function DiplomacyTab() {
                   >
                     🎁 ส่งบรรณาการ{' '}
                     <small>
-                      {costText(tribute)}, สัมพันธ์ +{RULES.tributeGain}
+                      {costText(tribute)}, สัมพันธ์ +{R.tributeGain}
                     </small>
                   </button>
                   <button
@@ -141,17 +159,17 @@ export function DiplomacyTab() {
                   >
                     🪷 จัดงานบุญร่วมกัน{' '}
                     <small>
-                      {costText(festival)}, สัมพันธ์ +{RULES.festivalGain}
+                      {costText(festival)}, สัมพันธ์ +{R.festivalGain}
                     </small>
                   </button>
                   <button
                     className="btn good"
-                    disabled={rel.rel < RULES.annexThreshold || !canPay(me.res, annex)}
+                    disabled={rel.rel < R.annexThreshold || !canPay(me.res, annex)}
                     onClick={() => dispatch({ type: 'annex', target: f.id })}
                   >
                     🤝 ผนวกโดยสันติ{' '}
                     <small>
-                      {costText(annex)}, ต้องมีสัมพันธ์ {RULES.annexThreshold}
+                      {costText(annex)}, ต้องมีสัมพันธ์ {R.annexThreshold}
                     </small>
                   </button>
                   <button

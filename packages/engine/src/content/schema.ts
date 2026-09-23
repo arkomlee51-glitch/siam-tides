@@ -81,7 +81,8 @@ export interface SeasonDefData {
  */
 export type BuildingEffect =
   | { kind: 'stabilityPerCity'; amount: number }
-  | { kind: 'disasterLossReduction'; disaster: string; reducedLoss: number };
+  | { kind: 'disasterLossReduction'; disaster: string; reducedLoss: number }
+  | { kind: 'cityDefenseMultiplier'; multiplier: number };
 
 export interface BuildingDefData {
   id: string;
@@ -161,7 +162,6 @@ export interface ChapterRulesData {
   riverBonus: PartialResourceAmounts;
   coastalWealth: number;
   cityDefense: number;
-  wallsDefense: number;
   capitalDefense: number;
   humanCapitalGarrison: number;
   newCityGarrison: number;

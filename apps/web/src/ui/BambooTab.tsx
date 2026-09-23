@@ -1,26 +1,17 @@
-import {
-  COSTS,
-  POWERS,
-  POWER_IDS,
-  RULES,
-  canPay,
-  earlyRattanakosinChapter,
-  offeringPower,
-  seasonOf,
-  yearOf,
-} from '@siam/engine';
+import { canPay, offeringPower, seasonOf, yearOf } from '@siam/engine';
+import type { ChapterRulesData, PowerId } from '@siam/engine';
 import { ME, useStore } from '../store';
-import { costText, seasonalCostOf } from './format';
+import { chapterOf, costText, seasonalCostOf } from './format';
 
-function zone(meter: number): { label: string; tone: string; note: string } {
+function zone(meter: number, R: ChapterRulesData): { label: string; tone: string; note: string } {
   const am = Math.abs(meter);
-  if (am <= RULES.balancedZone)
+  if (am <= R.balancedZone)
     return {
       label: 'สมดุล',
       tone: 'good',
-      note: `ได้ความรู้ +${RULES.balancedKnowBonus} ทุกฤดู ถ้าทั้งสองฝ่ายยังมีความอดทนอย่างน้อย 2`,
+      note: `ได้ความรู้ +${R.balancedKnowBonus} ทุกฤดู ถ้าทุกฝ่ายยังมีความอดทนอย่างน้อย 2`,
     };
-  if (am <= RULES.dangerZone)
+  if (am <= R.dangerZone)
     return { label: 'เอนเอียง', tone: 'warn', note: 'ยังปลอดภัย แต่ฝ่ายหนึ่งเริ่มมีเสียงดังในราชสำนัก' };
   return { label: 'อันตราย', tone: 'bad', note: 'เสียเอกราช 4 ทุกฤดู' };
 }
@@ -38,14 +29,21 @@ export function BambooTab() {
   const state = useStore((s) => s.state);
   const dispatch = useStore((s) => s.dispatch);
   const me = state.factions[ME]!;
-  const z = zone(me.meter);
-  const envoy = seasonalCostOf(state, COSTS.envoy, 'diplo');
-  const thisYear = offeringPower(earlyRattanakosinChapter, yearOf(state.turn));
-  const next = offeringPower(earlyRattanakosinChapter, yearOf(state.turn) + 1);
+  const chapter = chapterOf(state);
+  const R = chapter.rules;
+  const powers = chapter.foreignPowers;
+  const powerIds = Object.keys(powers) as PowerId[];
+  // the bamboo meter is two-ended by design (−100..+100); each power pulls toward its `side`
+  const leftSide = powerIds.filter((id) => powers[id]!.side < 0).map((id) => powers[id]!);
+  const rightSide = powerIds.filter((id) => powers[id]!.side > 0).map((id) => powers[id]!);
+  const z = zone(me.meter, R);
+  const envoy = seasonalCostOf(state, chapter.costs.envoy ?? {}, 'diplo');
+  const thisYear = offeringPower(chapter, yearOf(state.turn));
+  const next = offeringPower(chapter, yearOf(state.turn) + 1);
   const upcoming =
     seasonOf(state.turn).id === 'hot'
-      ? `ฤดูร้อนปีหน้า ${POWERS[next].name}จะยื่นข้อเสนอ`
-      : `ฤดูร้อนนี้ ${POWERS[thisYear].name}จะยื่นข้อเสนอ`;
+      ? `ฤดูร้อนปีหน้า ${powers[next]!.name}จะยื่นข้อเสนอ`
+      : `ฤดูร้อนนี้ ${powers[thisYear]!.name}จะยื่นข้อเสนอ`;
 
   return (
     <>
@@ -54,10 +52,10 @@ export function BambooTab() {
         <svg className="bamboo" viewBox="0 0 220 130" aria-hidden="true">
           <line x1="10" y1="119" x2="210" y2="119" stroke="var(--line)" strokeWidth="2" />
           <text x="8" y="22" fontSize="20">
-            🦁
+            {leftSide.map((p) => p.icon).join('')}
           </text>
           <text x="188" y="22" fontSize="20">
-            🦅
+            {rightSide.map((p) => p.icon).join('')}
           </text>
           <g className="stalk" style={{ transform: `rotate(${(me.meter * 0.4).toFixed(1)}deg)` }}>
             <path d="M110 118 L110 14" stroke="var(--good)" strokeWidth="7" strokeLinecap="round" />
@@ -91,8 +89,8 @@ export function BambooTab() {
           <i style={{ left: `${(me.meter + 100) / 2}%` }} />
         </div>
         <div className="mlabels">
-          <span>🦁 {POWERS.lion.name}</span>
-          <span>{POWERS.eagle.name} 🦅</span>
+          <span>{leftSide.map((p) => `${p.icon} ${p.name}`).join(' / ')}</span>
+          <span>{rightSide.map((p) => `${p.name} ${p.icon}`).join(' / ')}</span>
         </div>
         <p>
           <span className={`badge ${z.tone}`}>
@@ -102,16 +100,16 @@ export function BambooTab() {
           {z.note}
         </p>
         <p className="muted small">
-          เคยเอียงเกิน ±{RULES.dangerZone} มาแล้ว {me.extremeTurns} ฤดู ครบ {RULES.extremeLimit}{' '}
+          เคยเอียงเกิน ±{R.dangerZone} มาแล้ว {me.extremeTurns} ฤดู ครบ {R.extremeLimit}{' '}
           ฤดูจะได้ตอนจบใต้ร่มเงา แถบจะคืนเข้าหากลางทีละ 1 ทุกฤดู
         </p>
       </div>
       <p className="small">{upcoming} ปฏิเสธบ่อยจนความอดทนหมด จะเจอคำขาดเรือปืน</p>
-      {POWER_IDS.map((pid) => (
+      {powerIds.map((pid) => (
         <div className="card" key={pid}>
           <div className="ch">
-            <span style={{ fontSize: 22 }}>{POWERS[pid].icon}</span>
-            <h3>{POWERS[pid].name}</h3>
+            <span style={{ fontSize: 22 }}>{powers[pid]!.icon}</span>
+            <h3>{powers[pid]!.name}</h3>
             <span className="pips" title="ความอดทน">
               {'●'.repeat(me.powers[pid].patience)}
               {'○'.repeat(Math.max(0, 4 - me.powers[pid].patience))}
@@ -125,8 +123,8 @@ export function BambooTab() {
             >
               ✉️ ส่งคณะทูต{' '}
               <small>
-                {costText(envoy)}, ไผ่ {POWERS[pid].side < 0 ? '←' : '→'} {RULES.envoyMeter}, ความอดทน +1, 📜+
-                {RULES.envoyKnow}
+                {costText(envoy, chapter)}, ไผ่ {powers[pid]!.side < 0 ? '←' : '→'} {R.envoyMeter}, ความอดทน
+                +1, 📜+{R.envoyKnow}
               </small>
             </button>
           </div>

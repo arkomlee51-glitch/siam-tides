@@ -344,6 +344,54 @@ export เพิ่มจาก `index.ts` ให้เทสต์เรีย�
 63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint` ทั้ง src ของสาม package สะอาด, `prettier --check`
 สะอาด
 
+## Addendum 7 (รอบต่อมา): แก้ข้อสรุปที่เกินจริงใน Addendum 6 + ปิด economy/combat/movement + UI เว็บอ่านจาก chapter
+
+**แก้ไขข้อความใน Addendum 6 ตรง ๆ**: Addendum 6 (และ ROADMAP/คอมเมนต์ใน `state.ts` รอบนั้น) สรุปว่า
+gameplay logic "อ่านจาก chapter เกือบทั้งหมดแล้ว" — **ไม่จริง** รอบนั้นตรวจแค่ 6 ไฟล์ในรายการเดิม ไม่ได้ grep
+ทั้ง `src/` ใหม่ พอตรวจครบรอบนี้พบว่า `economy.ts` (`cityYield`: ผลผลิตภูมิประเทศ/อาคาร/แม่น้ำ/ชายฝั่ง,
+`upkeepOf`) กับ `combat.ts` (พลังรับของภูมิประเทศ/เมือง/เมืองหลวง, กองรักษาเมืองที่ยึดได้) ยังอ่าน
+`BUILDINGS`/`RULES`/`TERRAIN` จาก `data.ts` อยู่ — รอบก่อน ๆ รื้อแค่ส่วน perk ของสองไฟล์นี้ และเหตุผลที่เลื่อน
+`movement.ts` ใน Addendum 6 ก็ผิด: ฟังก์ชันใน `movement.ts` รับ `GameState` อยู่แล้ว ค่าเดินรายภูมิประเทศจึง
+อ่านจาก chapter ได้ตรง ๆ ปัญหา singleton จริง ๆ มีแค่ใน `hex.ts` (เหตุผล 4 ข้อใน Addendum 6 ยังใช้ได้กับ
+`hex.ts` เท่านั้น)
+
+รอบนี้ทำ:
+
+- **`economy.ts`** — `cityYield(city, chapter)` (**signature สาธารณะเปลี่ยน**: เพิ่มพารามิเตอร์ `chapter`
+  เพราะเดิมไม่มี state ให้ lookup) อ่าน `chapter.rules`/`chapter.terrain`/`chapter.buildings`, `upkeepOf`
+  อ่าน `upkeepPerStr` จาก chapter
+- **`combat.ts`** — พลังรับภูมิประเทศ/ชื่อภูมิประเทศ, `cityDefense`/`capitalDefense`, กองรักษาเมืองที่ยึดได้
+  อ่านจาก chapter — และ **ปิด literal building id ตัวสุดท้ายในเอนจิน**: `city.buildings.includes('walls')`
+  กลายเป็น `BuildingEffect` ชนิดใหม่ `{kind:'cityDefenseMultiplier', multiplier}` (`walls` ประกาศ 1.5 เท่า
+  เดิม) ผ่าน helper `buildingDefenseMultiplier(chapter, buildings)` — ลบ `wallsDefense` ออกจาก
+  `ChapterRulesData`/`RULES` ให้มีแหล่งค่าเดียว ข้อความรายงานศึกเปลี่ยนจาก "(มีกำแพง)" เป็น "(มี<ชื่ออาคาร>)"
+- **`movement.ts`/`ai.ts`** — ค่าเดินรายภูมิประเทศอ่านจาก `chapter.terrain` (ลบ `TERRAIN` import และคอมเมนต์
+  ที่อ้าง Addendum 6 ออกจาก `ai.ts`)
+- **UI เว็บ** — `apps/web/src/ui/format.ts` เพิ่ม `chapterOf(state)` (registry lookup ตัวเดียวกับเอนจิน) แล้ว
+  `BambooTab`/`DiplomacyTab`/`GoalsTab`/`Hud`/`InfoTab`/`Meters`/`Modals` อ่านค่าใช้จ่าย/กฎ/ชื่ออาคาร/ชื่อ
+  มหาอำนาจ/ตอนจบ/perk/ป้ายทรัพยากรจาก chapter — **เหตุผลที่สำคัญ**: ก่อนหน้านี้ถ้ามีบทที่สอง UI จะแสดงราคา
+  จาก `data.ts` แต่เอนจินเก็บเงินตามราคาของ chapter คนละค่ากัน — `costText(cost, chapter)` (signature ใหม่)
+  ใช้ไอคอนจาก `chapter.resourceLabels`; `BambooTab` แสดงมหาอำนาจสองฝั่งแถบไผ่ตาม `side` (แถบเป็นสองขั้วโดย
+  การออกแบบ ฝั่งหนึ่งมีหลายมหาอำนาจก็แสดงรวมกันได้); แก้ตัวเลขที่ hardcode ซ้ำใน UI ด้วย (`±25` ใน
+  `GoalsTab`, `🌾1 💰1` โบนัสแม่น้ำใน `InfoTab`)
+
+**ยังคงอ่าน `data.ts` โดยตั้งใจ (รายการครบ ตรวจด้วย grep ทั้ง `src/` แล้ว)**: `hex.ts` + `apps/web/src/map/
+MapRenderer.ts` (แผนที่ — Addendum 6), `state.ts`'s `seasonOf` + `SEASONS` ใน `Hud.tsx` (**ใหม่ในรายการนี้**:
+รายชื่อ/จำนวนฤดูผูกกับโค้ดเหตุการณ์ประจำฤดูใน `turn.ts` และ `S.id === 'rain'` ใน `ai.ts` ถ้าให้บทประกาศฤดู
+ของตัวเองก่อนมี `SeasonalEventDef` จะเกิดฤดูที่โค้ดเหตุการณ์ไม่รู้จัก จึงเลื่อนไปพร้อม Addendum 5 — UI ใช้
+`SEASONS` ตัวเดียวกับเอนจินเพื่อให้ตรงกันเสมอ), `RESOURCE_IDS` (chassis คงที่ตามข้อ 7), และ `apps/server/src/
+schemas.ts` (ลิสต์ `BuildingId`/`PowerId` สำหรับ validate คำสั่ง — ผูกกับ literal union ใน `types.ts` ด้วย
+compile-time assert อยู่แล้ว ขยายเมื่อ type ขยาย)
+
+**เทสต์ใหม่ 6 เคส**: engine 5 เคส — `buildingDefenseMultiplier` เท่ากับ walls ×1.5 เดิม + อาคารป้อมที่เอนจิน
+ไม่เคยรู้จัก (`bastion` ×2, ซ้อนกับ walls ได้ ×3), `cityYield` ตาม chapter ที่ส่งเข้าไป, ค่าเดินจาก chapter
+(ทุกภูมิประเทศค่า 99 → เดินได้แค่ก้าวแรกฟรี), `upkeepOf` จาก chapter; web 1 เคส — ลงทะเบียนบททดสอบที่เปลี่ยนชื่อ
+ยุ้งฉางและป้ายข้าว แล้วยืนยันว่า HUD/แผงเมืองแสดงชื่อจากบทนั้น ไม่ใช่ `data.ts` (เทสต์นี้จะล้มกับโค้ดเดิม)
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, `npm run build -w @siam/engine` ผ่าน, engine 68
+เคสผ่านหมด (63 + 5), server 63 ผ่านหมด (9 skip ตามเดิม), web 30 ผ่านหมด (29 + 1), `eslint` สะอาดทั้ง src/test,
+`prettier --check` สะอาดในไฟล์ที่แก้
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
@@ -357,10 +405,10 @@ export เพิ่มจาก `index.ts` ให้เทสต์เรีย�
   (`content/chapters/index.ts`) ให้ฟังก์ชัน pure lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: โครงสร้างเหตุการณ์
   ประจำฤดูเอง (ฤดูไหนเกิดอะไร, โอกาสเกิด, ข้อความ) ยังฝังเป็นโค้ดใน `turn.ts`'s `seasonalEvents` เหมือนเดิม
   — ตั้งใจรอเนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ schema นี้ (ดู Addendum 5)
-- **ทำแล้ว (Addendum 6)**: `endings.ts`/`actions.ts`/`views.ts` และส่วน balance rules ของ `ai.ts` อ่านจาก
-  chapter แล้ว + ฟิลด์ใหม่ `newCityNames` — **ตัดสินใจไม่ทำตอนนี้**: `hex.ts`/`movement.ts` (และบรรทัดค่าเดินใน
-  `ai.ts`) ยังอ่าน `MAP`/`TERRAIN`/`RIVER` จาก `data.ts` เป็น singleton เพราะกระทบ renderer ของเว็บ, เสี่ยงชนกัน
-  ระหว่างหลายเกมบนเซิร์ฟเวอร์ และยังไม่รู้ว่าบทอื่นจะมีแผนที่ของตัวเองจริงไหม (ดู Addendum 6)
+- **ทำแล้ว (Addendum 6+7)**: gameplay logic ทุกไฟล์ที่อ่านเนื้อหา (economy/combat/movement/ai/turn/powers/
+  endings/actions/views) และ UI เว็บอ่านจาก chapter แล้ว + ฟิลด์ `newCityNames` + effect `cityDefenseMultiplier`
+  (Addendum 6 เคยสรุปเกินจริง แก้ไว้ใน Addendum 7) — **ตั้งใจเลื่อน**: `hex.ts`/map renderer (แผนที่) กับ
+  `seasonOf`/`SEASONS` (ผูกกับโครงเหตุการณ์ประจำฤดู) ยังอ่าน `data.ts`
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
   ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
   เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude

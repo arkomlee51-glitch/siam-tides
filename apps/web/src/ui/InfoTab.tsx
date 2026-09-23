@@ -1,11 +1,6 @@
 import {
-  BUILDINGS,
-  BUILDING_IDS,
-  COSTS,
-  RESOURCES,
-  RULES,
-  TERRAIN,
   armyAt,
+  buildingDefenseMultiplier,
   atWar,
   canPay,
   cityAt,
@@ -19,9 +14,9 @@ import {
   seasonOf,
   terrainAt,
 } from '@siam/engine';
-import type { Army, City } from '@siam/engine';
+import type { Army, BuildingId, City, Cost } from '@siam/engine';
 import { ME, useStore } from '../store';
-import { RES_ORDER, costText, seasonalCostOf } from './format';
+import { RES_ORDER, chapterOf, costText as costTextIn, seasonalCostOf } from './format';
 
 function ArmyCard({ army }: { army: Army }) {
   const state = useStore((s) => s.state);
@@ -29,7 +24,9 @@ function ArmyCard({ army }: { army: Army }) {
   const mine = army.owner === ME;
   const owner = faction(state, army.owner);
   const season = seasonOf(state.turn);
-  const foundCost = seasonalCostOf(state, COSTS.found, 'build');
+  const chapter = chapterOf(state);
+  const costText = (c: Cost) => costTextIn(c, chapter);
+  const foundCost = seasonalCostOf(state, chapter.costs.found ?? {}, 'build');
   const blocker = foundBlocker(state, army);
   const me = state.factions[ME]!;
   return (
@@ -50,7 +47,7 @@ function ArmyCard({ army }: { army: Army }) {
               {army.mp} จาก {season.move}
             </b>
             <span>เสบียง</span>
-            <b>🌾{Math.ceil(army.str / RULES.upkeepPerStr)} ต่อฤดู</b>
+            <b>🌾{Math.ceil(army.str / chapter.rules.upkeepPerStr)} ต่อฤดู</b>
           </>
         )}
       </div>
@@ -95,8 +92,12 @@ function CityCard({ city }: { city: City }) {
   const owner = faction(state, city.owner);
   const mine = city.owner === ME;
   const season = seasonOf(state.turn);
-  const yields = cityYield(city);
-  const recruitCost = seasonalCostOf(state, COSTS.recruit, 'recruit');
+  const chapter = chapterOf(state);
+  const R = chapter.rules;
+  const costText = (c: Cost) => costTextIn(c, chapter);
+  const yields = cityYield(city, chapter);
+  const recruitCost = seasonalCostOf(state, chapter.costs.recruit ?? {}, 'recruit');
+  const fortifications = buildingDefenseMultiplier(chapter, city.buildings).names;
   const garrisonArmy = armyAt(state, city.c, city.r);
   const coastal = isCoastal(city.c, city.r);
   return (
@@ -110,53 +111,53 @@ function CityCard({ city }: { city: City }) {
       </div>
       <p className="muted small">
         {owner.name}, กองรักษาเมือง {city.garrison}
-        {city.buildings.includes('walls') ? ', มีกำแพง' : ''}
+        {fortifications.length ? `, มี${fortifications.join('/')}` : ''}
       </p>
       {mine ? (
         <>
           <div className="yield">
             {RES_ORDER.map((k) => (
               <span key={k}>
-                {RESOURCES[k].icon}
+                {chapter.resourceLabels[k].icon}
                 {yields[k]}
               </span>
             ))}
             <small>ผลผลิตต่อฤดูก่อนปรับตามฤดูกาล</small>
           </div>
           <h4>สิ่งก่อสร้าง{season.build < 1 && <span className="good small"> ลดราคาในฤดูร้อน</span>}</h4>
-          {BUILDING_IDS.filter((id) => !BUILDINGS[id].coastalOnly || coastal).map((id) => {
-            const def = BUILDINGS[id];
-            const built = city.buildings.includes(id);
-            const cost = seasonalCostOf(state, def.cost, 'build');
-            return (
-              <div className={`brow ${built ? 'done' : ''}`} key={id}>
-                <div>
-                  <b>{def.name}</b>
-                  <small>{def.desc}</small>
+          {(Object.keys(chapter.buildings) as BuildingId[])
+            .filter((id) => !chapter.buildings[id]!.coastalOnly || coastal)
+            .map((id) => {
+              const def = chapter.buildings[id]!;
+              const built = city.buildings.includes(id);
+              const cost = seasonalCostOf(state, def.cost, 'build');
+              return (
+                <div className={`brow ${built ? 'done' : ''}`} key={id}>
+                  <div>
+                    <b>{def.name}</b>
+                    <small>{def.desc}</small>
+                  </div>
+                  {built ? (
+                    <span className="good small">✓ มีแล้ว</span>
+                  ) : (
+                    <button
+                      className="btn sm"
+                      disabled={!canPay(me.res, cost)}
+                      onClick={() => dispatch({ type: 'build', cityId: city.id, building: id })}
+                    >
+                      {costText(cost)}
+                    </button>
+                  )}
                 </div>
-                {built ? (
-                  <span className="good small">✓ มีแล้ว</span>
-                ) : (
-                  <button
-                    className="btn sm"
-                    disabled={!canPay(me.res, cost)}
-                    onClick={() => dispatch({ type: 'build', cityId: city.id, building: id })}
-                  >
-                    {costText(cost)}
-                  </button>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
           <h4>กองทัพ</h4>
           <button
             className="btn wide"
-            disabled={!canPay(me.res, recruitCost) || (garrisonArmy?.str ?? 0) >= RULES.armyCap}
+            disabled={!canPay(me.res, recruitCost) || (garrisonArmy?.str ?? 0) >= R.armyCap}
             onClick={() => dispatch({ type: 'recruit', cityId: city.id })}
           >
-            {garrisonArmy
-              ? `⚔️ เสริมทัพในเมือง +${RULES.recruitReinforce}`
-              : `⚔️ เกณฑ์ทัพใหม่ (${RULES.recruitNew})`}{' '}
+            {garrisonArmy ? `⚔️ เสริมทัพในเมือง +${R.recruitReinforce}` : `⚔️ เกณฑ์ทัพใหม่ (${R.recruitNew})`}{' '}
             <small>{costText(recruitCost)}</small>
           </button>
           {!coastal && <p className="muted small">ท่าเรือสร้างได้เฉพาะเมืองติดทะเล</p>}
@@ -202,8 +203,12 @@ export function InfoTab() {
     );
   const army = armyAt(state, sel.c, sel.r);
   const city = cityAt(state, sel.c, sel.r);
-  const t = TERRAIN[terrain];
+  const chapter = chapterOf(state);
+  const t = chapter.terrain[terrain]!;
   const river = isRiver(sel.c, sel.r);
+  const riverBonus = RES_ORDER.filter((k) => chapter.rules.riverBonus[k])
+    .map((k) => `${chapter.resourceLabels[k].icon}${chapter.rules.riverBonus[k]}`)
+    .join(' ');
   return (
     <>
       {army && <ArmyCard army={army} />}
@@ -216,9 +221,9 @@ export function InfoTab() {
         <p className="muted small">
           ใช้แต้มเดิน {t.cost}, พลังรับ ×{t.def}, ผลผลิต{' '}
           {RES_ORDER.filter((k) => t.yield[k])
-            .map((k) => `${RESOURCES[k].icon}${t.yield[k]}`)
+            .map((k) => `${chapter.resourceLabels[k].icon}${t.yield[k]}`)
             .join(' ') || 'ไม่มี'}
-          {river ? ' 🌾1 💰1' : ''}
+          {river && riverBonus ? ` ${riverBonus}` : ''}
         </p>
       </div>
     </>

@@ -39,7 +39,7 @@ export { offeringPower, choicesFor } from './powers.js';
 export { runAi } from './ai.js';
 export { buildingStabilityBonus, allPowersPatient, disasterMitigation } from './turn.js';
 export { applyAction, foundBlocker, ERROR_MESSAGES } from './actions.js';
-export { combatMultiplier } from './combat.js';
+export { combatMultiplier, buildingDefenseMultiplier } from './combat.js';
 export { viewFor, describeDecision, fmtCost, seasonalCost } from './views.js';
 export type { DecisionInfo, DecisionOption } from './views.js';
 

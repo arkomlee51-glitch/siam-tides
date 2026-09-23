@@ -1,4 +1,3 @@
-import { RULES, TERRAIN } from './data.js';
 import { getChapterById } from './content/chapters/index.js';
 import type { ChapterDefinition } from './content/schema.js';
 import { hasPerk } from './economy.js';
@@ -65,16 +64,40 @@ function eliminateHuman(ctx: Ctx, fid: FactionId): void {
   chronicle(ctx.s, fid, `${f.name}ล่มสลาย`);
 }
 
+/**
+ * Combined city-defense multiplier from a city's buildings, as declared in chapter data
+ * (`BuildingEffect` kind `cityDefenseMultiplier`) — replaces the old literal
+ * `buildings.includes('walls')` check (docs/adr/0007 Addendum 7). Returns the
+ * multiplier plus the names of the buildings that contributed, for the battle report.
+ */
+export function buildingDefenseMultiplier(
+  chapter: ChapterDefinition,
+  buildings: readonly string[],
+): { multiplier: number; names: string[] } {
+  let multiplier = 1;
+  const names: string[] = [];
+  for (const b of buildings) {
+    const def = chapter.buildings[b];
+    for (const eff of def?.effects ?? []) {
+      if (eff.kind !== 'cityDefenseMultiplier') continue;
+      multiplier *= eff.multiplier;
+      names.push(def!.name);
+    }
+  }
+  return { multiplier, names };
+}
+
 export function captureCity(ctx: Ctx, city: City, newOwner: FactionId): void {
   const s = ctx.s;
+  const R = getChapterById(s.chapterId).rules;
   const prevOwner = city.owner;
   const prev = faction(s, prevOwner);
   const winner = faction(s, newOwner);
   const wasCapital = city.capital;
   city.owner = newOwner;
   city.capital = false;
-  city.garrison = RULES.capturedGarrison;
-  city.baseGarrison = RULES.capturedBaseGarrison;
+  city.garrison = R.capturedGarrison;
+  city.baseGarrison = R.capturedBaseGarrison;
   chronicle(s, newOwner, `ยึดเมือง${city.name}จาก${prev.name}`);
   chronicle(s, prevOwner, `เสียเมือง${city.name}ให้${winner.name}`);
   if (winner.kind === 'human') {
@@ -109,14 +132,15 @@ export function resolveBattle(ctx: Ctx, att: Army, tc: number, tr: number): Batt
   const defArmy = armyAt(s, tc, tr);
   const city = cityAt(s, tc, tr);
   const defender = (defArmy ?? city)!.owner;
+  const chapter = getChapterById(s.chapterId);
   const t = terrainAt(tc, tr)!;
-  const tDef = TERRAIN[t].def;
-  const walls = !!city?.buildings.includes('walls');
+  const terrain = chapter.terrain[t]!;
+  const tDef = terrain.def;
+  const fortify = buildingDefenseMultiplier(chapter, city?.buildings ?? []);
   const isCapital = !!city?.capital;
   const cityMod = city
-    ? RULES.cityDefense * (walls ? RULES.wallsDefense : 1) * (city.capital ? RULES.capitalDefense : 1)
+    ? chapter.rules.cityDefense * fortify.multiplier * (city.capital ? chapter.rules.capitalDefense : 1)
     : 1;
-  const chapter = getChapterById(s.chapterId);
   const attF = faction(s, att.owner);
   const defF = faction(s, defender);
   const pAtk = combatMultiplier(attF, chapter);
@@ -149,7 +173,7 @@ export function resolveBattle(ctx: Ctx, att: Army, tc: number, tr: number): Batt
     if ((f === attF) === win) f.stats.wins++;
   }
 
-  const place = city ? city.name : TERRAIN[t].short;
+  const place = city ? city.name : terrain.short;
   let captured = false;
   let routed = false;
   if (win) {
@@ -180,7 +204,7 @@ export function resolveBattle(ctx: Ctx, att: Army, tc: number, tr: number): Batt
     `ฝ่ายบุก ${attF.name}: กำลัง ${atkStr} ขวัญ ${atkMor}% ได้พลังรบ ${A.toFixed(0)}`,
     `ฝ่ายรับ ${defF.name}: กำลัง ${defStr}${city ? ` (รวมกองรักษาเมือง ${g0})` : ''} ขวัญ ${defMor}% ได้พลังรบ ${D.toFixed(0)}`,
     `${S.icon} ${S.name} ปรับพลังบุก ×${S.atk}`,
-    `ภูมิประเทศ${TERRAIN[t].short} ปรับพลังรับ ×${tDef}${city ? `, ตัวเมือง ×${cityMod.toFixed(2)}${walls ? ' (มีกำแพง)' : ''}${isCapital ? ' (เมืองหลวง)' : ''}` : ''}`,
+    `ภูมิประเทศ${terrain.short} ปรับพลังรับ ×${tDef}${city ? `, ตัวเมือง ×${cityMod.toFixed(2)}${fortify.names.length ? ` (มี${fortify.names.join('/')})` : ''}${isCapital ? ' (เมืองหลวง)' : ''}` : ''}`,
   ];
   if (pAtk !== 1) lines.push(`วิทยาการของ${attF.name}เพิ่มพลังบุก ×${pAtk.toFixed(2)}`);
   if (pDef !== 1) lines.push(`วิทยาการของ${defF.name}เพิ่มพลังรับ ×${pDef.toFixed(2)}`);

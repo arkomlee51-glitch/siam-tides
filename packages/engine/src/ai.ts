@@ -1,6 +1,3 @@
-// NOTE: TERRAIN stays imported straight from data.ts here (not chapter.terrain) for the
-// same reason as movement.ts/hex.ts — see docs/adr/0007 Addendum 6 "ขอบเขตที่ตั้งใจไม่ทำ".
-import { TERRAIN } from './data.js';
 import { getChapterById } from './content/chapters/index.js';
 import { resolveBattle } from './combat.js';
 import { hexDistance, neighbors, terrainAt } from './hex.js';
@@ -42,12 +39,13 @@ function stepAlong(
   stopNearEnemy: boolean,
 ): void {
   const full = mp;
+  const terrain = getChapterById(s.chapterId).terrain;
   for (let i = 0; i < path.length - 1; i++) {
     const [nc, nr] = path[i]!;
     if (armyAt(s, nc, nr)) break;
     const city = cityAt(s, nc, nr);
     if (city && city.owner !== a.owner) break;
-    const cost = TERRAIN[terrainAt(nc, nr)!].cost;
+    const cost = terrain[terrainAt(nc, nr)!]!.cost;
     if (cost > mp && !(mp === full && i === 0)) break;
     mp -= cost;
     a.c = nc;

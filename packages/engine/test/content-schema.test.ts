@@ -8,7 +8,10 @@ import {
   allPowersPatient,
   applyLegacyBonuses,
   armiesOf,
+  buildingDefenseMultiplier,
   buildingStabilityBonus,
+  capitalOf,
+  cityYield,
   combatMultiplier,
   computeIncome,
   computeLegacyBonuses,
@@ -17,12 +20,14 @@ import {
   disasterMitigation,
   earlyRattanakosinChapter,
   finishGame,
+  hexDistance,
   mergeLegacyBonuses,
   offeringPower,
   reachableTiles,
   resourceMultiplier,
   runAi,
   scaleCost,
+  upkeepOf,
   validateChapterDefinition,
 } from '../src/index.js';
 import { seasonOf } from '../src/index.js';
@@ -413,6 +418,23 @@ describe('building/terrain effects and foreign-power generalization (ADR-0007 Ad
   });
 });
 
+function withCustomChapter<T>(
+  overrides: Partial<ChapterDefinition>,
+  fn: (chapter: ChapterDefinition) => T,
+): T {
+  const chapter: ChapterDefinition = {
+    ...earlyRattanakosinChapter,
+    manifest: { ...earlyRattanakosinChapter.manifest, id: `test-custom-${Math.random()}` },
+    ...overrides,
+  };
+  CHAPTERS[chapter.manifest.id] = chapter;
+  try {
+    return fn(chapter);
+  } finally {
+    delete CHAPTERS[chapter.manifest.id];
+  }
+}
+
 /**
  * actions.ts/endings.ts/views.ts/ai.ts now resolve chapter content via
  * `getChapterById(s.chapterId)` instead of importing data.ts directly (ADR-0007
@@ -422,23 +444,6 @@ describe('building/terrain effects and foreign-power generalization (ADR-0007 Ad
  * how a real second chapter would be registered in `content/chapters/index.ts`.
  */
 describe('actions/endings/views/ai resolve chapter data generically, not data.ts literals (ADR-0007 Addendum 6)', () => {
-  function withCustomChapter<T>(
-    overrides: Partial<ChapterDefinition>,
-    fn: (chapter: ChapterDefinition) => T,
-  ): T {
-    const chapter: ChapterDefinition = {
-      ...earlyRattanakosinChapter,
-      manifest: { ...earlyRattanakosinChapter.manifest, id: `test-custom-${Math.random()}` },
-      ...overrides,
-    };
-    CHAPTERS[chapter.manifest.id] = chapter;
-    try {
-      return fn(chapter);
-    } finally {
-      delete CHAPTERS[chapter.manifest.id];
-    }
-  }
-
   it('applyAction "found" draws the city name, cost, and garrison from chapter data, not data.ts', () => {
     withCustomChapter(
       {
@@ -553,5 +558,82 @@ describe('actions/endings/views/ai resolve chapter data generically, not data.ts
         expect(s.chronicle.some((e) => e.text.includes('เถ้าถ่านทดสอบ'))).toBe(true);
       },
     );
+  });
+});
+
+describe('combat/economy/movement read terrain, building and rule data from the chapter (ADR-0007 Addendum 7)', () => {
+  it('buildingDefenseMultiplier reproduces the old walls ×1.5 from data, not a literal walls check', () => {
+    expect(buildingDefenseMultiplier(earlyRattanakosinChapter, ['walls'])).toEqual({
+      multiplier: 1.5,
+      names: [earlyRattanakosinChapter.buildings['walls']!.name],
+    });
+    expect(buildingDefenseMultiplier(earlyRattanakosinChapter, ['market', 'temple'])).toEqual({
+      multiplier: 1,
+      names: [],
+    });
+  });
+
+  it('buildingDefenseMultiplier is generic: an invented fortification the engine never saw stacks too', () => {
+    const chapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        bastion: {
+          id: 'bastion',
+          name: 'ป้อมทดสอบ',
+          desc: 'ทดสอบ',
+          cost: {},
+          yield: {},
+          effects: [{ kind: 'cityDefenseMultiplier', multiplier: 2 }],
+        },
+      },
+    };
+    expect(buildingDefenseMultiplier(chapter, ['bastion']).multiplier).toBe(2);
+    expect(buildingDefenseMultiplier(chapter, ['bastion', 'walls']).multiplier).toBeCloseTo(3);
+  });
+
+  it('cityYield reads building/terrain/rule yields from the chapter it is given', () => {
+    const s = createGame({ humans: [{ id: 'p1' }], seed: 1 });
+    const capital = { ...capitalOf(s, 'p1')!, buildings: ['market' as BuildingId] };
+    const base = cityYield(capital, earlyRattanakosinChapter);
+    const richer: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        market: { ...earlyRattanakosinChapter.buildings['market']!, yield: { wealth: 100 } },
+      },
+      rules: {
+        ...earlyRattanakosinChapter.rules,
+        cityBaseYield: { rice: 0, man: 0, wealth: 0, faith: 0, know: 0 },
+      },
+    };
+    const custom = cityYield(capital, richer);
+    const marketWealth = earlyRattanakosinChapter.buildings['market']!.yield.wealth ?? 0;
+    const baseWealth = earlyRattanakosinChapter.rules.cityBaseYield.wealth;
+    expect(custom.wealth).toBe(base.wealth - marketWealth - baseWealth + 100);
+  });
+
+  it('movement cost comes from chapter.terrain: with every terrain costing 99, only the free first step is reachable', () => {
+    const terrain = Object.fromEntries(
+      Object.entries(earlyRattanakosinChapter.terrain).map(([id, t]) => [id, { ...t, cost: 99 }]),
+    );
+    withCustomChapter({ terrain }, (chapter) => {
+      const s = createGame({ chapter, humans: [{ id: 'p1' }], seed: 6 });
+      const army = armiesOf(s, 'p1')[0]!;
+      const tiles = [...reachableTiles(s, army).values()];
+      expect(tiles.length).toBeGreaterThan(0);
+      for (const t of tiles) {
+        expect(hexDistance([army.c, army.r], [t.c, t.r])).toBe(1);
+        expect(t.left).toBe(0);
+      }
+    });
+  });
+
+  it('upkeepOf uses chapter.rules.upkeepPerStr, not data.ts RULES', () => {
+    withCustomChapter({ rules: { ...earlyRattanakosinChapter.rules, upkeepPerStr: 1 } }, (chapter) => {
+      const s = createGame({ chapter, humans: [{ id: 'p1' }], seed: 7 });
+      const totalStr = armiesOf(s, 'p1').reduce((sum, a) => sum + a.str, 0);
+      expect(upkeepOf(s, 'p1')).toBe(totalStr);
+    });
   });
 });

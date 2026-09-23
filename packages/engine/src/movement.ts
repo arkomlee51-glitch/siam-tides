@@ -1,4 +1,4 @@
-import { TERRAIN } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
 import { key, neighbors, parseKey, terrainAt } from './hex.js';
 import { armyAt, atWar, cityAt, seasonOf } from './state.js';
 import type { Army, GameState } from './types.js';
@@ -24,6 +24,7 @@ export function reachableTiles(s: GameState, army: Army): Map<string, ReachTile>
   const out = new Map<string, ReachTile>();
   if (army.mp <= 0) return out;
   const full = seasonOf(s.turn).move;
+  const terrain = getChapterById(s.chapterId).terrain;
   const best = new Map<string, number>([[key(army.c, army.r), army.mp]]);
   const queue: [number, number, number][] = [[army.c, army.r, army.mp]];
   while (queue.length) {
@@ -32,7 +33,7 @@ export function reachableTiles(s: GameState, army: Army): Map<string, ReachTile>
     if ((best.get(key(c, r)) ?? -1) > m) continue;
     for (const [nc, nr] of neighbors(c, r)) {
       if (!passable(s, army, nc, nr)) continue;
-      let left = m - TERRAIN[terrainAt(nc, nr)!].cost;
+      let left = m - terrain[terrainAt(nc, nr)!]!.cost;
       if (left < 0) {
         const isStart = c === army.c && r === army.r;
         if (isStart && army.mp === full) left = 0;
@@ -61,6 +62,7 @@ export function attackTargets(s: GameState, army: Army): Set<string> {
 
 /** Cheapest path (excluding start, including goal). Goal may be occupied. */
 export function pathTo(s: GameState, army: Army, tc: number, tr: number): [number, number][] | null {
+  const terrain = getChapterById(s.chapterId).terrain;
   const start = key(army.c, army.r);
   const goal = key(tc, tr);
   const dist = new Map<string, number>([[start, 0]]);
@@ -77,7 +79,7 @@ export function pathTo(s: GameState, army: Army, tc: number, tr: number): [numbe
       if (!t) continue;
       const nk = key(nc, nr);
       if (nk !== goal && !passable(s, army, nc, nr)) continue;
-      const nd = d + TERRAIN[t].cost;
+      const nd = d + terrain[t]!.cost;
       if ((dist.get(nk) ?? Infinity) <= nd) continue;
       dist.set(nk, nd);
       prev.set(nk, k);

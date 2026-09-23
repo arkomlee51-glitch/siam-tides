@@ -188,6 +188,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     cost: { wealth: 30, man: 10 },
     yield: {},
     garrisonBonus: 5,
+    effects: [{ kind: 'cityDefenseMultiplier', multiplier: 1.5 }],
   },
   port: {
     id: 'port',
@@ -224,7 +225,6 @@ export const RULES = {
   riverBonus: { rice: 1, wealth: 1 } as Partial<Resources>,
   coastalWealth: 2,
   cityDefense: 1.25,
-  wallsDefense: 1.5,
   capitalDefense: 1.3,
   humanCapitalGarrison: 30,
   newCityGarrison: 8,

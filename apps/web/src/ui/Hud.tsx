@@ -1,6 +1,8 @@
-import { RESOURCES, SEASONS, computeIncome, seasonOf, upkeepOf, yearOf } from '@siam/engine';
+// SEASONS intentionally still comes from data.ts: the engine's `seasonOf` does too, until the
+// seasonal-event structure becomes chapter data (docs/adr/0007 Addendum 5/7).
+import { SEASONS, computeIncome, seasonOf, upkeepOf, yearOf } from '@siam/engine';
 import { ME, useStore } from '../store';
-import { RES_ORDER, signed } from './format';
+import { RES_ORDER, chapterOf, signed } from './format';
 import type { ThemeMode } from '../theme';
 
 export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () => void }) {
@@ -10,6 +12,7 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
   const online = useStore((s) => s.mode === 'server');
   const connection = useStore((s) => s.connection);
   const inFlight = useStore((s) => s.inFlight);
+  const labels = chapterOf(state).resourceLabels;
   const goOnline = useStore((s) => s.goOnline);
   const goOffline = useStore((s) => s.goOffline);
   const me = state.factions[ME]!;
@@ -48,7 +51,11 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
           <button className="btn icon" onClick={() => pushModal({ kind: 'intro' })}>
             วิธีเล่น
           </button>
-          <button className="btn icon" onClick={() => pushModal({ kind: 'account' })} title="บัญชีและเกมของฉัน">
+          <button
+            className="btn icon"
+            onClick={() => pushModal({ kind: 'account' })}
+            title="บัญชีและเกมของฉัน"
+          >
             บัญชี
           </button>
           <button
@@ -88,15 +95,13 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
               className="chip"
               key={k}
               title={
-                k === 'rice'
-                  ? `${RESOURCES[k].name} (หักเสบียงทัพ ${upkeepOf(state, ME)})`
-                  : RESOURCES[k].name
+                k === 'rice' ? `${labels[k].name} (หักเสบียงทัพ ${upkeepOf(state, ME)})` : labels[k].name
               }
             >
-              <span>{RESOURCES[k].icon}</span>
+              <span>{labels[k].icon}</span>
               <span className="v">{me.res[k]}</span>
               <span className={`d ${income[k] < 0 ? 'neg' : ''}`}>{signed(income[k])}</span>
-              <span className="lbl">{RESOURCES[k].name}</span>
+              <span className="lbl">{labels[k].name}</span>
             </div>
           ))}
         </div>

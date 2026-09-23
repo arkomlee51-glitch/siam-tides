@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { armiesOf, capitalOf } from '@siam/engine';
+import { CHAPTERS, armiesOf, capitalOf, createGame, earlyRattanakosinChapter } from '@siam/engine';
+import type { ChapterDefinition } from '@siam/engine';
 import { ME, useStore } from '../src/store';
 import { Hud } from '../src/ui/Hud';
 import { SidePanel } from '../src/ui/SidePanel';
@@ -64,5 +65,33 @@ describe('modals', () => {
     expect(screen.getByRole('button', { name: /ต่อรอง/ })).toBeDefined();
     act(() => screen.getByRole('button', { name: /ปฏิเสธ/ }).click());
     expect(useStore.getState().state.pending.some((p) => p.kind === 'offer')).toBe(false);
+  });
+});
+
+describe('chapter-driven UI (ADR-0007 Addendum 7)', () => {
+  it("shows names and labels from the game's own chapter, not data.ts", () => {
+    const chapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      manifest: { ...earlyRattanakosinChapter.manifest, id: 'ui-test-chapter' },
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        granary: { ...earlyRattanakosinChapter.buildings['granary']!, name: 'ยุ้งทดสอบ' },
+      },
+      resourceLabels: { ...earlyRattanakosinChapter.resourceLabels, rice: { name: 'ข้าวทดสอบ', icon: '🍙' } },
+    };
+    CHAPTERS[chapter.manifest.id] = chapter;
+    try {
+      act(() => useStore.setState({ state: createGame({ chapter, humans: [{ id: ME }], seed: 3 }) }));
+      render(<Hud mode="light" onCycleTheme={() => {}} />);
+      render(<SidePanel />);
+      expect(screen.getByText('ข้าวทดสอบ')).toBeDefined();
+      const cap = capitalOf(useStore.getState().state, ME)!;
+      select(cap.c, cap.r);
+      expect(screen.getByText('ยุ้งทดสอบ')).toBeDefined();
+      expect(screen.queryByText('ยุ้งฉาง')).toBeNull();
+    } finally {
+      cleanup();
+      delete CHAPTERS[chapter.manifest.id];
+    }
   });
 });
