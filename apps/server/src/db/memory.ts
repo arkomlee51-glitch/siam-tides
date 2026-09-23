@@ -21,6 +21,8 @@ export function createMemoryDb(): Db {
         seed: input.seed ?? null,
         engineVersion: input.engineVersion,
         maxTurn: input.maxTurn ?? null,
+        chapterId: input.chapterId,
+        seasonTimerSeconds: input.seasonTimerSeconds ?? null,
         createdBy: input.createdBy,
         createdAt: now,
         finishedAt: null,

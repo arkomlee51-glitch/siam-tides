@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ENGINE_VERSION, applyAction, createGame, viewFor, visibleTo } from '@siam/engine';
+import { ENGINE_VERSION, applyAction, createGame, getChapterById, viewFor, visibleTo } from '@siam/engine';
 import type { Action, GameEvent, GameState } from '@siam/engine';
 import type { Verifier } from '../auth.js';
 import type { Db, DbSeat } from '../db/index.js';
@@ -50,7 +50,12 @@ export class GameService {
 
   async create(input: CreateGameInput, ownerUserId: string, ownerName: string | null): Promise<CreatedGame> {
     const displayName = input.name?.trim() || ownerName || 'ผู้เล่น';
-    return this.createWithHumans([{ userId: ownerUserId, name: displayName }], input.seed, input.maxTurn, undefined);
+    return this.createWithHumans(
+      [{ userId: ownerUserId, name: displayName }],
+      input.seed,
+      input.maxTurn,
+      undefined,
+    );
   }
 
   /** เฟส 5: สร้างเกมจากห้องรอที่ครบที่นั่งแล้ว — เจ้าของห้อง (index 0) ได้ที่นั่ง p1 เสมอ ที่เหลือ p2..p4 ตามลำดับที่เข้าร่วม */
@@ -94,6 +99,8 @@ export class GameService {
         engineVersion: ENGINE_VERSION,
         seed: seed ?? state.seed,
         maxTurn,
+        chapterId: state.chapterId,
+        seasonTimerSeconds,
         createdBy: humans[0]!.userId,
         seats: dbSeats,
       });
@@ -289,7 +296,14 @@ export class GameService {
       const humans = data.seats
         .filter((s): s is DbSeat & { userId: string } => s.userId !== null)
         .map((s) => ({ id: s.factionId, name: s.name }));
-      state = createGame({ seed: data.game.seed ?? undefined, maxTurn: data.game.maxTurn ?? undefined, humans });
+      // null chapterId = เกมก่อนเฟส 6 → บท default ของ createGame; id ที่ไม่ได้ลงทะเบียนจะ throw ชัด ๆ
+      // (ดีกว่า replay ด้วยบทผิดเงียบ ๆ)
+      state = createGame({
+        seed: data.game.seed ?? undefined,
+        maxTurn: data.game.maxTurn ?? undefined,
+        humans,
+        chapter: data.game.chapterId ? getChapterById(data.game.chapterId) : undefined,
+      });
       version = 0;
     }
 
@@ -310,10 +324,13 @@ export class GameService {
       state,
       createdAt: data.game.createdAt,
       updatedAt: new Date().toISOString(),
-      // หมายเหตุ: seasonTimerSeconds ยังไม่ถูกเก็บถาวรใน Supabase (มีแค่ใน Redis/memory record)
-      // cold-start replay จึงคืนมาแบบไม่มีตัวจับเวลาเสมอ — งดเวลาต่อฤดูมากกว่าค้างเวลาผิด ๆ
-      seasonTimerSeconds: null,
-      seasonDeadline: null,
+      // เก็บแค่วินาทีต่อฤดูใน Supabase ไม่เก็บ deadline — replay เริ่มนับฤดูปัจจุบันใหม่เต็มช่วง
+      // (ผู้เล่นได้เวลาเพิ่มได้อย่างเดียว ไม่มีทางเสียเวลา) ดู ADR-0007 Addendum 8
+      seasonTimerSeconds: data.game.seasonTimerSeconds,
+      seasonDeadline:
+        data.game.seasonTimerSeconds && !state.ended
+          ? new Date(Date.now() + data.game.seasonTimerSeconds * 1000).toISOString()
+          : null,
     };
     await this.store.putGame(record);
     return record;

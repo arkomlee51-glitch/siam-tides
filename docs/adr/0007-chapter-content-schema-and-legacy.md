@@ -392,6 +392,49 @@ compile-time assert อยู่แล้ว ขยายเมื่อ type �
 เคสผ่านหมด (63 + 5), server 63 ผ่านหมด (9 skip ตามเดิม), web 30 ผ่านหมด (29 + 1), `eslint` สะอาดทั้ง src/test,
 `prettier --check` สะอาดในไฟล์ที่แก้
 
+## Addendum 8 (รอบต่อมา): cold-start replay จำค่าตั้งเกมได้ครบ — `season_timer_seconds` + `chapter_id`
+
+ปิดค้างจากเฟส 5 (ADR-0006 ข้อ 8) ที่เลื่อนไว้เพราะ "ต้องออกแบบ+ทดสอบ migration ใหม่" — ตอนนี้ทดสอบ migration
+กับ Postgres จริงได้แล้ว (pglite, ดู Addendum แรก) เลยไม่ติดแล้ว และระหว่างทางเจอช่องว่างคู่กันอีกจุด:
+
+- **`games.chapter_id` มีคอลัมน์แล้วตั้งแต่ migration เฟส 6 แต่ server ไม่เคยเขียนหรืออ่านเลย** — replay จาก
+  genesis เรียก `createGame({ seed, maxTurn, humans })` โดยไม่ส่ง chapter เสมอ จึงสร้างเกมด้วยบท default
+  ทุกครั้ง ยังไม่กระทบเพราะมีบทเดียว แต่พอมีบทที่สอง เกมบทอื่นที่ Redis หมดอายุก่อนมี snapshot จะ replay ผิดบท
+  เงียบ ๆ (เส้นทางที่มี snapshot ไม่เป็นไร เพราะ `GameState.chapterId` อยู่ใน snapshot อยู่แล้ว)
+- **`season_timer_seconds`** — migration ใหม่ `20260923000000_game_settings.sql` เพิ่มคอลัมน์ `int` nullable
+  พร้อม check `> 0 และ <= 604800` (ตรงกับเพดานของ zod ใน `schemas.ts`; ขั้นต่ำ 30 วินาทียังบังคับที่ HTTP
+  เหมือนเดิม — DB ไม่บังคับ 30 เพราะเทสต์เรียก service ตรงด้วยค่า 1 วินาที)
+
+ทำ: `CreateGameInput`/`DbGame` เพิ่ม `chapterId`/`seasonTimerSeconds` (**บังคับทั้งคู่ใน input** ให้ผู้เรียก
+ทุกจุดต้องตัดสินใจเองชัด ๆ), `supabase.ts`/`memory.ts` เขียน/อ่านสองคอลัมน์นี้, `GameService` ส่ง
+`state.chapterId`/`seasonTimerSeconds` ตอนสร้างเกม และ replay ใช้ทั้งคู่ — `chapterId` เป็น null (เกมก่อน
+เฟส 6) → บท default; id ที่ไม่ได้ลงทะเบียน → `getChapterById` throw ชัด ๆ (ดีกว่า replay ผิดบทเงียบ ๆ)
+
+**ตัดสินใจเก็บแค่ "วินาทีต่อฤดู" ไม่เก็บ deadline ของฤดูปัจจุบัน**: ตอน replay เริ่มนับฤดูปัจจุบันใหม่เต็มช่วง —
+ผู้เล่นได้เวลาเพิ่มได้อย่างเดียว ไม่มีทางเสียเวลา (หลักเดียวกับข้อ 8 เดิมที่ว่าปลอดภัยกว่าเดาเวลาที่เหลือผิด) และ
+ไม่ต้องเขียน DB เพิ่มทุกครั้งที่ขึ้นฤดูใหม่ — ข้อแลก: เกมที่ cold-start บ่อยมากในฤดูเดียวอาจได้เวลายาวกว่าที่ตั้ง
+ไว้ ยอมรับได้เพราะ cold-start เกิดแค่ตอน Redis หมดอายุ/instance ใหม่ ไม่ใช่ทุก request
+
+เทสต์ใหม่ (server): `db.test.ts` ยืนยันค่ากลับมาครบจาก `loadForReplay`; `replay.test.ts` 2 เคส — ตัวจับเวลา
+รอด cold-start (60 วินาทีเดิม, deadline ใหม่ = เวลา replay + 60 วินาทีเต็ม) และ replay จาก genesis ใช้บทของเกม
+นั้นเอง (ลงทะเบียนบททดสอบที่ข้าวเริ่มต้น 999 แล้วยืนยันว่าเกมที่ replay ได้ 999 และ `chapterId` ถูก) — ทั้งสอง
+เคสจะล้มกับโค้ดเดิม (โค้ดเดิม hardcode `seasonTimerSeconds: null` และไม่ส่ง chapter)
+
+**ตรวจ migration กับ Postgres จริงผ่าน pglite** (รันใน scratch นอก repo แบบเดียวกับ Addendum แรก): รันทั้ง 3
+migration ตามลำดับผ่าน, คอลัมน์ได้ `integer`/nullable ถูก, ค่า 60/null/604800 ผ่าน, 0/−5/604801 ถูก check
+constraint ปฏิเสธ, chapter_id/season_timer_seconds อ่านกลับได้ถูก
+
+**บอกตรง ๆ เรื่องการทดสอบ migration**: ทั้งรอบนี้และ Addendum แรกเป็นการรันครั้งเดียวใน scratch — **ไม่มี
+เทสต์ migration ที่ commit อยู่ใน repo** (`@electric-sql/pglite` ไม่ได้อยู่ใน dependencies) — ตั้งใจไม่เพิ่ม
+dependency จากสภาพแวดล้อมนี้เพราะ `npm install` จาก VM ของ device bridge ลงใน `node_modules` บนเครื่องลี
+เสี่ยงสลับ binary เฉพาะแพลตฟอร์ม (rollup/esbuild ของ Windows vs Linux) และ VM นี้ลบไฟล์ไม่ได้ ถ้า npm ต้องลบ
+ของเก่าระหว่างติดตั้ง `node_modules` อาจค้างครึ่ง ๆ — ถ้าลีอยากให้มีเทสต์ migration ถาวรใน CI แนะนำให้รัน
+`npm i -D @electric-sql/pglite -w @siam/server` เองบนเครื่อง แล้วค่อยย้ายสคริปต์ตรวจเข้า `apps/server/test/`
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, server 65 ผ่านหมด (63 + 2, 9 skip ตามเดิม),
+`eslint` สะอาด — **ต้อง push migration ใหม่นี้ขึ้น Supabase project จริงด้วย** พร้อมสองไฟล์เดิมเมื่อตั้ง
+project แล้ว
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`

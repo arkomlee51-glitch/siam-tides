@@ -13,6 +13,8 @@ describe('MemoryDb — contract', () => {
       engineVersion: '0.1.0',
       seed: 42,
       maxTurn: 30,
+      chapterId: 'early-rattanakosin',
+      seasonTimerSeconds: 90,
       createdBy: 'user-1',
       seats: [
         { factionId: 'p1', seat: 'center', name: 'ผู้เล่น', userId: 'user-1', ending: null },
@@ -21,6 +23,9 @@ describe('MemoryDb — contract', () => {
     });
     const data = await db.loadForReplay(id);
     expect(data?.game.seed).toBe(42);
+    // ค่าตั้งเกมที่ replay ต้องใช้ ต้องกลับมาครบ (ADR-0007 Addendum 8)
+    expect(data?.game.chapterId).toBe('early-rattanakosin');
+    expect(data?.game.seasonTimerSeconds).toBe(90);
     expect(data?.seats).toHaveLength(2);
     expect(data?.snapshot).toBeNull();
     expect(data?.actionsSinceSnapshot).toEqual([]);
@@ -35,7 +40,16 @@ describe('MemoryDb — contract', () => {
     const db = createMemoryDb();
     const id = randomUUID();
     const genesis = createGame({ seed: 1 });
-    await db.createGame({ id, engineVersion: '0.1.0', seed: 1, maxTurn: 30, createdBy: 'u', seats: [] });
+    await db.createGame({
+      id,
+      engineVersion: '0.1.0',
+      seed: 1,
+      maxTurn: 30,
+      chapterId: 'early-rattanakosin',
+      seasonTimerSeconds: undefined,
+      createdBy: 'u',
+      seats: [],
+    });
     await db.appendAction({
       gameId: id,
       seq: 1,
@@ -75,6 +89,8 @@ describe('MemoryDb — contract', () => {
       engineVersion: '0.1.0',
       seed: 1,
       maxTurn: 30,
+      chapterId: 'early-rattanakosin',
+      seasonTimerSeconds: undefined,
       createdBy: 'u',
       seats: [{ factionId: 'p1', seat: 'center', name: 'x', userId: 'u', ending: null }],
     });
@@ -136,6 +152,8 @@ describe('replay ต้องได้ state เท่าเดิมกับ�
       engineVersion: '0.1.0',
       seed: 555,
       maxTurn: state.maxTurn,
+      chapterId: state.chapterId,
+      seasonTimerSeconds: undefined,
       createdBy: 'u',
       seats: Object.values(state.factions).map((f) => ({
         factionId: f.id,

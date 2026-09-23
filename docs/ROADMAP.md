@@ -124,8 +124,9 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
 - [x] ตัวจับเวลาฤดู ตั้งได้ตอนสร้างห้องรอ (`seasonTimerSeconds`) หมดเวลาแล้ว request ถัดไป (GET/action/ws
       sync) จะบังคับ `endTurn` แทนคนที่ยังไม่พร้อมให้อัตโนมัติ ผ่าน `applyAction`/`game_actions` เดียวกับ
       คำสั่งปกติทุกประการ (replay ซ้ำได้) — ดู [ADR-0006](adr/0006-human-diplomacy-and-season-timer.md) และ
-      `apps/server/test/season-timer.test.ts` **ข้อจำกัด**: ค่านี้ยังไม่ถูกเขียนลง Supabase เกมจะกลับเป็น
-      "ไม่จำกัดเวลา" ถ้าเกิด cold-start replay
+      `apps/server/test/season-timer.test.ts` — ~~ข้อจำกัด: ยังไม่ถูกเขียนลง Supabase~~ ปิดแล้ว: เก็บใน
+      `games.season_timer_seconds` (migration `20260923000000_game_settings.sql`) cold-start replay จำค่าเดิม
+      และเริ่มนับฤดูปัจจุบันใหม่เต็มช่วง — ดู ADR-0007 Addendum 8
 - [x] การทูตระหว่างมนุษย์ — ข้อเสนอสงบศึกที่อีกฝ่ายต้องตอบรับเอง (`proposePeace`/`answerProposal` ใน engine,
       ไม่ใช่ `PendingDecision` เดิมที่ผูกกับอำนาจต่างชาติ — ดู ADR-0006) ทดสอบครบทั้งระดับ engine
       (`packages/engine/test/engine.test.ts`) และผ่าน HTTP จริงรวมความเป็นส่วนตัวของข้อเสนอ

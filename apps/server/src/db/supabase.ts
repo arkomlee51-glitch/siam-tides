@@ -9,6 +9,8 @@ interface GameRow {
   seed: number | null;
   engine_version: string;
   max_turn: number | null;
+  chapter_id: string | null;
+  season_timer_seconds: number | null;
   created_by: string;
   created_at: string;
   finished_at: string | null;
@@ -45,6 +47,8 @@ const toDbGame = (row: GameRow): DbGame => ({
   seed: row.seed,
   engineVersion: row.engine_version,
   maxTurn: row.max_turn,
+  chapterId: row.chapter_id ?? null,
+  seasonTimerSeconds: row.season_timer_seconds ?? null,
   createdBy: row.created_by,
   createdAt: row.created_at,
   finishedAt: row.finished_at,
@@ -95,20 +99,20 @@ export function createSupabaseDb(opts: SupabaseDbOptions): Db {
         seed: input.seed ?? null,
         engine_version: input.engineVersion,
         max_turn: input.maxTurn ?? null,
+        chapter_id: input.chapterId,
+        season_timer_seconds: input.seasonTimerSeconds ?? null,
         created_by: input.createdBy,
       });
       if (gameErr) throw new Error(`บันทึกเกมลง Supabase ไม่สำเร็จ: ${gameErr.message}`);
 
-      const rows = input.seats.map(
-        (s): Omit<GamePlayerRow, 'ending'> & { ending?: string | null } => ({
-          game_id: input.id,
-          user_id: s.userId,
-          faction_id: s.factionId,
-          seat: s.seat,
-          name: s.name,
-          ending: s.ending,
-        }),
-      );
+      const rows = input.seats.map((s): Omit<GamePlayerRow, 'ending'> & { ending?: string | null } => ({
+        game_id: input.id,
+        user_id: s.userId,
+        faction_id: s.factionId,
+        seat: s.seat,
+        name: s.name,
+        ending: s.ending,
+      }));
       const { error: playersErr } = await client.from('game_players').insert(rows);
       if (playersErr) throw new Error(`บันทึกที่นั่งผู้เล่นลง Supabase ไม่สำเร็จ: ${playersErr.message}`);
     },
@@ -126,17 +130,15 @@ export function createSupabaseDb(opts: SupabaseDbOptions): Db {
     },
 
     async putSnapshot(snapshot: DbSnapshot) {
-      const { error } = await client
-        .from('game_snapshots')
-        .upsert(
-          {
-            game_id: snapshot.gameId,
-            turn: snapshot.turn,
-            version: snapshot.version,
-            state: snapshot.state,
-          },
-          { onConflict: 'game_id,turn' },
-        );
+      const { error } = await client.from('game_snapshots').upsert(
+        {
+          game_id: snapshot.gameId,
+          turn: snapshot.turn,
+          version: snapshot.version,
+          state: snapshot.state,
+        },
+        { onConflict: 'game_id,turn' },
+      );
       if (error) throw new Error(`บันทึก snapshot ลง Supabase ไม่สำเร็จ: ${error.message}`);
     },
 
@@ -185,7 +187,11 @@ export function createSupabaseDb(opts: SupabaseDbOptions): Db {
         .update({ status: 'finished', finished_at: new Date().toISOString() })
         .eq('id', gameId);
       for (const [factionId, ending] of Object.entries(endingByFactionId)) {
-        await client.from('game_players').update({ ending }).eq('game_id', gameId).eq('faction_id', factionId);
+        await client
+          .from('game_players')
+          .update({ ending })
+          .eq('game_id', gameId)
+          .eq('faction_id', factionId);
       }
     },
 

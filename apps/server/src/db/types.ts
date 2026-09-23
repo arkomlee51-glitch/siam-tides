@@ -15,6 +15,10 @@ export interface DbGame {
   seed: number | null;
   engineVersion: string;
   maxTurn: number | null;
+  /** `ChapterDefinition.manifest.id` — null = เกมที่สร้างก่อนเฟส 6 (บทเดียวที่ชิป) */
+  chapterId: string | null;
+  /** วินาทีต่อฤดู — null = ไม่จำกัดเวลา */
+  seasonTimerSeconds: number | null;
   createdBy: string;
   createdAt: string;
   finishedAt: string | null;
@@ -42,6 +46,8 @@ export interface CreateGameInput {
   engineVersion: string;
   seed: number | undefined;
   maxTurn: number | undefined;
+  chapterId: string;
+  seasonTimerSeconds: number | undefined;
   createdBy: string;
   seats: DbSeat[];
 }
