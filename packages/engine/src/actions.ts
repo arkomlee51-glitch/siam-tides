@@ -21,6 +21,7 @@ import {
 } from './state.js';
 import type { Ctx } from './state.js';
 import { resolveSeason } from './turn.js';
+import { fmtCost } from './views.js';
 import type { Action, ActionError, ActionResult, Army, Faction, FactionId, GameState } from './types.js';
 
 export const ERROR_MESSAGES: Record<ActionError, string> = {
@@ -70,6 +71,33 @@ export function foundBlocker(s: GameState, a: Army): string | null {
 function aiTarget(s: GameState, target: FactionId): Faction | null {
   const t = s.factions[target];
   return t && t.kind === 'ai' && t.alive ? t : null;
+}
+
+/** Any other living faction, AI or human. */
+function otherTarget(s: GameState, f: Faction, target: FactionId): Faction | null {
+  const t = s.factions[target];
+  return t && t.alive && t.id !== f.id ? t : null;
+}
+
+/**
+ * `from` joins `into` peacefully: cities and armies change hands, `from` leaves the game.
+ * Shared by paying to annex an AI and a human accepting a union proposal (ADR-0008).
+ */
+function absorbFaction(ctx: Ctx, into: Faction, from: Faction): void {
+  const s = ctx.s;
+  for (const c of s.cities) if (c.owner === from.id) Object.assign(c, { owner: into.id, capital: false });
+  for (const army of s.armies)
+    if (army.owner === from.id) Object.assign(army, { owner: into.id, mp: 0, moved: true });
+  from.alive = false;
+  for (const other of Object.values(s.factions))
+    if (other.id !== from.id) relation(s, other.id, from.id).war = false;
+  s.pending = s.pending.filter((d) => d.faction !== from.id);
+  s.proposals = (s.proposals ?? []).filter((x) => x.from !== from.id && x.to !== from.id);
+  s.ready = s.ready.filter((x) => x !== from.id);
+  into.stats.annexed++;
+  into.stability = clamp(into.stability + 5, 0, 100);
+  emit(ctx, null, 'diplomacy', 'good', `🤝 ${from.name}เข้าร่วมกับ${into.name}โดยสันติ`);
+  chronicle(s, into.id, `${from.name}เข้าร่วมแผ่นดินโดยสันติ`);
 }
 
 type Handler<A extends Action> = (
@@ -200,6 +228,7 @@ const handlers: Handlers = {
   },
 
   tribute(ctx, f, a, chapter) {
+    // to a human, the tribute is a real gift: they receive what you paid (ADR-0008)
     return improveRelation(
       ctx,
       f,
@@ -207,6 +236,8 @@ const handlers: Handlers = {
       chapter.costs.tribute ?? {},
       chapter.rules.tributeGain,
       'ส่งบรรณาการ',
+      'ส่งบรรณาการให้คุณ',
+      true,
     );
   },
 
@@ -218,29 +249,34 @@ const handlers: Handlers = {
       chapter.costs.festival ?? {},
       chapter.rules.festivalGain,
       'จัดงานบุญร่วมกับ',
+      'จัดงานบุญร่วมกับคุณ',
+      false,
     );
   },
 
   annex(ctx, f, a, chapter) {
     const s = ctx.s;
-    const t = aiTarget(s, a.target);
+    const t = otherTarget(s, f, a.target);
     if (!t) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (rel.war) return 'AT_WAR';
     if (rel.rel < chapter.rules.annexThreshold) return 'RELATION_TOO_LOW';
     const cost = scaleCost(chapter.costs.annex ?? {}, seasonOf(s.turn).diplo);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
+    if (t.kind === 'human') {
+      // a human is never annexed by payment — it becomes a union proposal only they can accept;
+      // the cost is paid on acceptance, not now (ADR-0008)
+      s.proposals = (s.proposals ?? []).filter(
+        (x) => !(x.from === f.id && x.to === t.id && x.kind === 'union'),
+      );
+      s.proposals.push({ id: newId(s, 'pr'), kind: 'union', from: f.id, to: t.id, turn: s.turn });
+      emit(ctx, [t.id], 'diplomacy', 'info', `🤝 ${f.name}เสนอรวมแผ่นดินกับคุณ รอคำตอบ`);
+      emit(ctx, [f.id], 'diplomacy', 'info', `ส่งข้อเสนอรวมแผ่นดินถึง${t.name}แล้ว รอคำตอบ`);
+      chronicle(s, f.id, `เสนอรวมแผ่นดินกับ${t.name}`);
+      return null;
+    }
     pay(f.res, cost);
-    for (const c of s.cities) if (c.owner === t.id) Object.assign(c, { owner: f.id, capital: false });
-    for (const army of s.armies)
-      if (army.owner === t.id) Object.assign(army, { owner: f.id, mp: 0, moved: true });
-    t.alive = false;
-    for (const other of Object.values(s.factions))
-      if (other.id !== t.id) relation(s, other.id, t.id).war = false;
-    f.stats.annexed++;
-    f.stability = clamp(f.stability + 5, 0, 100);
-    emit(ctx, null, 'diplomacy', 'good', `🤝 ${t.name}เข้าร่วมกับ${f.name}โดยสันติ`);
-    chronicle(s, f.id, `${t.name}เข้าร่วมแผ่นดินโดยสันติ`);
+    absorbFaction(ctx, f, t);
     return null;
   },
 
@@ -252,6 +288,11 @@ const handlers: Handlers = {
     if (rel.war) return 'AT_WAR';
     rel.war = true;
     rel.rel = Math.min(rel.rel, chapter.rules.warRelationCap);
+    // a pending union offer between the two is moot once they are at war (ADR-0008)
+    s.proposals = (s.proposals ?? []).filter(
+      (x) =>
+        !(x.kind === 'union' && ((x.from === f.id && x.to === t.id) || (x.from === t.id && x.to === f.id))),
+    );
     f.stability = clamp(f.stability - 5, 0, 100);
     for (const ai of aiFactions(s)) {
       if (ai.id === t.id) continue;
@@ -311,6 +352,26 @@ const handlers: Handlers = {
     s.proposals = proposals.filter((x) => x !== p);
     const other = s.factions[p.from];
     if (!other) return null;
+    const what = p.kind === 'union' ? 'รวมแผ่นดิน' : 'สงบศึก';
+    if (a.accept && other.alive && p.kind === 'union') {
+      const rel = relation(s, f.id, p.from);
+      const cost = scaleCost(chapter.costs.annex ?? {}, seasonOf(s.turn).diplo);
+      if (rel.war || !canPay(other.res, cost)) {
+        // conditions changed since it was proposed — void it rather than half-apply
+        const why = rel.war ? 'ทั้งสองฝ่ายอยู่ในภาวะสงคราม' : `${other.name}มีทรัพย์ไม่พอจ่าย`;
+        emit(ctx, [f.id, p.from], 'diplomacy', 'warn', `ข้อเสนอรวมแผ่นดินเป็นโมฆะ: ${why}`);
+        return null;
+      }
+      pay(other.res, cost);
+      f.ending = 'union';
+      absorbFaction(ctx, other, f);
+      chronicle(s, f.id, `ยอมรับข้อเสนอรวมแผ่นดินกับ${other.name}`);
+      // the acceptor just left the game: if every remaining human had already ended the season,
+      // nobody is left to trigger it — resolve it here instead of deadlocking
+      const waiting = humanFactions(s).filter((h) => !s.ready.includes(h.id));
+      if (humanFactions(s).length && !waiting.length) resolveSeason(ctx);
+      return null;
+    }
     if (a.accept && other.alive) {
       if (p.kind === 'peace') {
         const rel = relation(s, f.id, p.from);
@@ -324,8 +385,8 @@ const handlers: Handlers = {
         chronicle(s, f.id, `สงบศึกกับ${other.name}`);
       }
     } else {
-      emit(ctx, [p.from], 'diplomacy', 'bad', `${f.name}ปฏิเสธข้อเสนอสงบศึกของ${other.name}`);
-      chronicle(s, f.id, `ปฏิเสธข้อเสนอสงบศึกจาก${other.name}`);
+      emit(ctx, [p.from], 'diplomacy', 'bad', `${f.name}ปฏิเสธข้อเสนอ${what}ของ${other.name}`);
+      chronicle(s, f.id, `ปฏิเสธข้อเสนอ${what}จาก${other.name}`);
     }
     return null;
   },
@@ -354,8 +415,11 @@ function improveRelation(
   base: Parameters<typeof scaleCost>[0],
   gain: number,
   label: string,
+  /** what a human target is told, e.g. "ส่งบรรณาการให้คุณ" */
+  receivedLabel: string,
+  giftToHuman: boolean,
 ): ActionError | null {
-  const t = aiTarget(ctx.s, target);
+  const t = otherTarget(ctx.s, f, target);
   if (!t) return 'INVALID_TARGET';
   const rel = relation(ctx.s, t.id, f.id);
   if (rel.war) return 'AT_WAR';
@@ -364,6 +428,11 @@ function improveRelation(
   pay(f.res, cost);
   rel.rel = clamp(rel.rel + gain, -100, 100);
   emit(ctx, [f.id], 'diplomacy', 'good', `${label}${t.name} ความสัมพันธ์ +${gain}`);
+  if (t.kind === 'human') {
+    if (giftToHuman) for (const k of Object.keys(cost) as (keyof typeof cost)[]) t.res[k] += cost[k] ?? 0;
+    const gift = giftToHuman ? ` ได้รับ ${fmtCost(cost)}` : '';
+    emit(ctx, [t.id], 'diplomacy', 'good', `${f.name}${receivedLabel}${gift} ความสัมพันธ์ +${gain}`);
+  }
   return null;
 }
 

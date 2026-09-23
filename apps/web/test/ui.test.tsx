@@ -1,12 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { CHAPTERS, armiesOf, capitalOf, createGame, earlyRattanakosinChapter } from '@siam/engine';
+import {
+  CHAPTERS,
+  applyAction,
+  armiesOf,
+  capitalOf,
+  createGame,
+  earlyRattanakosinChapter,
+  pairKey,
+} from '@siam/engine';
 import type { ChapterDefinition } from '@siam/engine';
 import { ME, useStore } from '../src/store';
 import { Hud } from '../src/ui/Hud';
 import { SidePanel } from '../src/ui/SidePanel';
 import { Modals } from '../src/ui/Modals';
 import { GoalsTab } from '../src/ui/GoalsTab';
+import { DiplomacyTab } from '../src/ui/DiplomacyTab';
 
 beforeEach(() => {
   useStore.getState().newGame(3);
@@ -112,5 +121,28 @@ describe('Legacy card (ADR-0007 Addendum 9)', () => {
     expect(screen.getByText('มรดกจากบทก่อน')).toBeDefined();
     expect(screen.getByText(/การทหาร.*\+10%/)).toBeDefined();
     expect(screen.getByText(/ภูมิปัญญา.*\+5%/)).toBeDefined();
+  });
+});
+
+describe('human diplomacy (ADR-0008)', () => {
+  it('shows tribute/festival/union for another human, and the accept/decline for an incoming union offer', () => {
+    let s = createGame({
+      humans: [
+        { id: ME, name: 'เรา' },
+        { id: 'p2', name: 'เพื่อนบ้าน' },
+      ],
+      seed: 5,
+    });
+    s.relations[pairKey(ME, 'p2')]!.rel = 90;
+    s.factions.p2!.res.wealth = 999;
+    s.factions.p2!.res.faith = 999;
+    const r = applyAction(s, 'p2', { type: 'annex', target: ME });
+    if (!r.ok) throw new Error(r.error);
+    s = r.state;
+    act(() => useStore.setState({ state: s }));
+    render(<DiplomacyTab />);
+    expect(screen.getByRole('button', { name: /ส่งบรรณาการ.*อีกฝ่ายได้รับจริง/ })).toBeDefined();
+    expect(screen.getByRole('button', { name: /ยอมรับรวมแผ่นดิน/ })).toBeDefined();
+    expect(screen.getByText(/เพื่อนบ้านเสนอรวมแผ่นดินกับคุณ/)).toBeDefined();
   });
 });

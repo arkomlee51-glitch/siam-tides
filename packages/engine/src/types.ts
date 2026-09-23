@@ -9,7 +9,11 @@ export type Cost = Partial<Resources>;
 export type BuildingId = 'granary' | 'market' | 'temple' | 'academy' | 'walls' | 'port';
 export type PerkId = 'irrig' | 'powder' | 'print';
 export type PowerId = 'lion' | 'eagle';
-export type EndingId = 'ashes' | 'shadow' | 'empire' | 'river' | 'wisdom' | 'survive';
+/**
+ * `union` is never *evaluated* at game end — it is set directly when a human accepts another
+ * human's union proposal (ADR-0008), which is why it is not in `ENDING_ORDER`.
+ */
+export type EndingId = 'ashes' | 'shadow' | 'empire' | 'river' | 'wisdom' | 'survive' | 'union';
 export type SeatId = 'center' | 'north' | 'east' | 'south';
 export type Coord = readonly [c: number, r: number];
 
@@ -96,7 +100,8 @@ export interface PendingDecision {
   demand: number;
 }
 
-export type ProposalKind = 'peace';
+/** `peace`: end a war between two humans. `union`: `from` absorbs `to` peacefully if `to` accepts (ADR-0008). */
+export type ProposalKind = 'peace' | 'union';
 
 /** A proposal one human sends another; only 'to' can answer it. Not a PendingDecision — does not block the sender's own turn. */
 export interface DiplomaticProposal {

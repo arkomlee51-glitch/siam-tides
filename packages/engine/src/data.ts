@@ -338,6 +338,13 @@ export interface EndingDef {
 /** Evaluated top to bottom — first match wins. */
 export const ENDING_ORDER: readonly EndingId[] = ['ashes', 'shadow', 'empire', 'river', 'wisdom', 'survive'];
 export const ENDINGS: Record<EndingId, EndingDef> = {
+  union: {
+    id: 'union',
+    icon: '🤝',
+    name: 'รวมแผ่นดิน',
+    cond: 'ยอมรับข้อเสนอรวมแผ่นดินจากผู้เล่นอื่น',
+    text: 'แคว้นของคุณเลือกรวมเข้ากับเพื่อนบ้านโดยไม่ต้องเสียเลือดเนื้อ ราษฎรปลอดภัย ชื่อของคุณถูกจารึกในฐานะผู้ยอมถอยเพื่อความสงบของแผ่นดิน',
+  },
   ashes: {
     id: 'ashes',
     icon: '🕯️',

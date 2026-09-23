@@ -130,8 +130,9 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
 - [x] การทูตระหว่างมนุษย์ — ข้อเสนอสงบศึกที่อีกฝ่ายต้องตอบรับเอง (`proposePeace`/`answerProposal` ใน engine,
       ไม่ใช่ `PendingDecision` เดิมที่ผูกกับอำนาจต่างชาติ — ดู ADR-0006) ทดสอบครบทั้งระดับ engine
       (`packages/engine/test/engine.test.ts`) และผ่าน HTTP จริงรวมความเป็นส่วนตัวของข้อเสนอ
-      (`apps/server/test/multiplayer.test.ts`) **ยังไม่ทำ**: `tribute`/`festival`/`annex` ยังใช้ได้แค่กับ AI
-      เท่านั้นเหมือนเดิม (ปรับความสัมพันธ์/ผนวกดินแดนกับมนุษย์ด้วยกันยังไม่มี flow)
+      (`apps/server/test/multiplayer.test.ts`) ~~`tribute`/`festival`/`annex` ใช้ได้แค่กับ AI~~
+      ปิดแล้ว: บรรณาการให้มนุษย์เป็นของขวัญจริง, งานบุญเหมือน AI, ผนวกมนุษย์เป็นข้อเสนอ "รวมแผ่นดิน" ที่อีกฝ่าย
+      ต้องยอมรับเอง (ตอนจบใหม่ `union`) — ดู [ADR-0008](adr/0008-human-tribute-festival-union.md)
 - [x] ยืนยันว่าตอนจบเกมหลายคนคำนวณถูกต้อง — แต่ละมนุษย์ได้ `ending` ของตัวเองอิสระจากกันอยู่แล้วในเอนจิน
       (`finishGame` ใน `packages/engine/src/endings.ts` วนทุก human faction) แค่ไม่เคยมีเทสต์ยืนยันมาก่อน
       ตอนนี้มีแล้วทั้ง engine และผ่าน HTTP จริง (`apps/server/test/multiplayer.test.ts`)

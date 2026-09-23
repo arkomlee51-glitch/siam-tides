@@ -27,7 +27,9 @@ export function DiplomacyTab() {
     <>
       {aliveHumans.length > 0 && (
         <>
-          <p className="muted small">ผู้เล่นคนอื่น — สงบศึกต้องให้อีกฝ่ายตอบรับเอง ไม่ใช่จ่ายเงินซื้อ</p>
+          <p className="muted small">
+            ผู้เล่นคนอื่น — สงบศึกและรวมแผ่นดินต้องให้อีกฝ่ายตอบรับเอง ไม่ใช่จ่ายเงินซื้อ
+          </p>
           {aliveHumans.map((f) => {
             const rel = relation(state, f.id, ME);
             const outgoing = state.proposals.find(
@@ -36,6 +38,15 @@ export function DiplomacyTab() {
             const incoming = state.proposals.find(
               (p) => p.from === f.id && p.to === ME && p.kind === 'peace',
             );
+            const incomingUnion = state.proposals.find(
+              (p) => p.from === f.id && p.to === ME && p.kind === 'union',
+            );
+            const outgoingUnion = state.proposals.find(
+              (p) => p.from === ME && p.to === f.id && p.kind === 'union',
+            );
+            const tribute = cost(costs.tribute);
+            const festival = cost(costs.festival);
+            const annex = cost(costs.annex);
             return (
               <div className="card" key={f.id}>
                 <div className="ch">
@@ -85,21 +96,98 @@ export function DiplomacyTab() {
                       </button>
                     )
                   ) : (
-                    <button
-                      className="btn danger"
-                      onClick={() =>
-                        pushModal({
-                          kind: 'confirm',
-                          title: `ประกาศสงครามกับ${f.name}?`,
-                          body: 'ความสัมพันธ์จะลดเหลือไม่เกิน −60 เสถียรภาพ −5 และแคว้นอื่นจะไม่พอใจ สงครามยังลดเสถียรภาพ 2 ทุกฤดูจนกว่าจะสงบศึก อีกฝ่ายต้องยอมรับข้อเสนอเองจึงจะสงบศึกได้',
-                          confirmLabel: 'ประกาศสงคราม',
-                          danger: true,
-                          action: { type: 'declareWar', target: f.id },
-                        })
-                      }
-                    >
-                      ⚔️ ประกาศสงคราม
-                    </button>
+                    <>
+                      {incomingUnion ? (
+                        <>
+                          <p className="muted small">
+                            {f.name}เสนอรวมแผ่นดินกับคุณ — ถ้ายอมรับ เมืองและทัพทั้งหมดของคุณจะเข้าร่วมกับ
+                            {f.name} และคุณจะจบเกมด้วยตอนจบ "{chapter.endings['union']?.name ?? 'รวมแผ่นดิน'}"
+                          </p>
+                          <button
+                            className="btn good"
+                            onClick={() =>
+                              pushModal({
+                                kind: 'confirm',
+                                title: `รวมแผ่นดินกับ${f.name}?`,
+                                body: 'คุณจะออกจากเกมทันทีหลังยอมรับ ย้อนกลับไม่ได้',
+                                confirmLabel: 'ยอมรับรวมแผ่นดิน',
+                                danger: true,
+                                action: {
+                                  type: 'answerProposal',
+                                  proposalId: incomingUnion.id,
+                                  accept: true,
+                                },
+                              })
+                            }
+                          >
+                            🤝 ยอมรับรวมแผ่นดิน
+                          </button>
+                          <button
+                            className="btn"
+                            onClick={() =>
+                              dispatch({
+                                type: 'answerProposal',
+                                proposalId: incomingUnion.id,
+                                accept: false,
+                              })
+                            }
+                          >
+                            ปฏิเสธ
+                          </button>
+                        </>
+                      ) : null}
+                      <button
+                        className="btn"
+                        disabled={!canPay(me.res, tribute)}
+                        onClick={() => dispatch({ type: 'tribute', target: f.id })}
+                      >
+                        🎁 ส่งบรรณาการ{' '}
+                        <small>
+                          {costText(tribute)} (อีกฝ่ายได้รับจริง), สัมพันธ์ +{R.tributeGain}
+                        </small>
+                      </button>
+                      <button
+                        className="btn"
+                        disabled={!canPay(me.res, festival)}
+                        onClick={() => dispatch({ type: 'festival', target: f.id })}
+                      >
+                        🪷 จัดงานบุญร่วมกัน{' '}
+                        <small>
+                          {costText(festival)}, สัมพันธ์ +{R.festivalGain}
+                        </small>
+                      </button>
+                      {outgoingUnion ? (
+                        <button className="btn" disabled>
+                          🤝 เสนอรวมแผ่นดินแล้ว รอคำตอบจาก{f.name}
+                        </button>
+                      ) : (
+                        <button
+                          className="btn good"
+                          disabled={rel.rel < R.annexThreshold || !canPay(me.res, annex)}
+                          onClick={() => dispatch({ type: 'annex', target: f.id })}
+                        >
+                          🤝 เสนอรวมแผ่นดิน{' '}
+                          <small>
+                            {costText(annex)} จ่ายเมื่ออีกฝ่ายยอมรับ, ต้องมีสัมพันธ์ {R.annexThreshold}
+                          </small>
+                        </button>
+                      )}
+                      <button
+                        className="btn danger"
+                        onClick={() =>
+                          pushModal({
+                            kind: 'confirm',
+                            title: `ประกาศสงครามกับ${f.name}?`,
+                            body: 'ความสัมพันธ์จะลดเหลือไม่เกิน −60 เสถียรภาพ −5 และแคว้นอื่นจะไม่พอใจ สงครามยังลดเสถียรภาพ 2 ทุกฤดูจนกว่าจะสงบศึก อีกฝ่ายต้องยอมรับข้อเสนอเองจึงจะสงบศึกได้',
+                            confirmLabel: 'ประกาศสงคราม',
+                            danger: true,
+                            action: { type: 'declareWar', target: f.id },
+                          })
+                        }
+                      >
+                        ⚔️ ประกาศสงคราม
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
