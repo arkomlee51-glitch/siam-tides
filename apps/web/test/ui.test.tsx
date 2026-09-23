@@ -146,3 +146,32 @@ describe('human diplomacy (ADR-0008)', () => {
     expect(screen.getByText(/เพื่อนบ้านเสนอรวมแผ่นดินกับคุณ/)).toBeDefined();
   });
 });
+
+describe('chapter picker (ADR-0009)', () => {
+  it('lists every chapter with a draft badge, and starting one uses that chapter everywhere', () => {
+    act(() => useStore.setState({ modals: [{ kind: 'newGame' }] }));
+    render(<Modals />);
+    expect(screen.getByText(/บทที่ 3: สุโขทัย–อยุธยาตอนต้น/)).toBeDefined();
+    expect(screen.getByText(/บทที่ 4: ต้นรัตนโกสินทร์/)).toBeDefined();
+    expect(screen.getAllByText('ร่าง').length).toBe(2);
+
+    act(() =>
+      screen
+        .getByText(/บทที่ 3: สุโขทัย–อยุธยาตอนต้น/)
+        .closest('button')!
+        .click(),
+    );
+    const s = useStore.getState().state;
+    expect(s.chapterId).toBe('sukhothai-ayutthaya');
+    expect(s.factions[ME]!.name).toBe('แคว้นสุโขทัย');
+    cleanup();
+
+    // the new game opens with this chapter's intro, naming its own capital — not the old chapter's
+    render(<Modals />);
+    expect(screen.getByText('แผ่นดินใหม่ใต้เงาอาณาจักรเก่า')).toBeDefined();
+    expect(screen.getByText(/คุณปกครองสุโขทัย/)).toBeDefined();
+    cleanup();
+    render(<Hud mode="light" onCycleTheme={() => {}} />);
+    expect(screen.getByText(/บทสุโขทัย–อยุธยาตอนต้น \(ร่าง\)/)).toBeDefined();
+  });
+});

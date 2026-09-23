@@ -5,8 +5,10 @@ import {
   armyAt,
   atWar,
   attackTargets,
+  DEFAULT_CHAPTER_ID,
   createGame,
   faction,
+  getChapterById,
   reachableTiles,
 } from '@siam/engine';
 import type { Action, Army, BattleReport, FactionId, GameEvent, GameState, ReachTile } from '@siam/engine';
@@ -41,10 +43,15 @@ export type Modal =
   | { kind: 'ending' }
   | { kind: 'account' }
   | { kind: 'lobby' }
+  | { kind: 'newGame' }
   | { kind: 'confirm'; title: string; body: string; confirmLabel: string; danger?: boolean; action: Action };
 
 export const ME: FactionId = 'p1';
 const MY_NAME = 'อาณาจักรนที';
+
+/** the kingdom a player rules in a chapter — that chapter's first seat, not a hard-coded name (ADR-0009) */
+export const kingdomName = (chapterId?: string): string =>
+  getChapterById(chapterId ?? DEFAULT_CHAPTER_ID).seats[0]!.factionName;
 
 /** คำสั่งที่ผลลัพธ์ขึ้นกับการสุ่ม — client ทายเองไม่ได้ จึงรอคำตอบจาก server */
 const RNG_ACTIONS: ReadonlySet<Action['type']> = new Set(['attack', 'offerPeace', 'endTurn']);
@@ -92,10 +99,10 @@ export interface Store {
   closeModal: () => void;
   confirmModal: () => void;
   showToast: (text: string) => void;
-  newGame: (seed?: number) => void;
+  newGame: (seed?: number, chapterId?: string) => void;
   hydrate: () => Promise<void>;
 
-  goOnline: (seed?: number) => Promise<void>;
+  goOnline: (seed?: number, chapterId?: string) => Promise<void>;
   resumeOnline: (gameId: string) => Promise<void>;
   goOffline: () => void;
   refresh: () => Promise<void>;
@@ -103,14 +110,19 @@ export interface Store {
   openSocket: () => void;
 
   /** เฟส 5: ห้องรอ/รหัสเชิญ */
-  createLobby: (seasonTimerSeconds?: number) => Promise<void>;
+  createLobby: (seasonTimerSeconds?: number, chapterId?: string) => Promise<void>;
   joinLobby: (code: string) => Promise<void>;
   refreshLobby: () => Promise<void>;
   leaveLobby: () => Promise<void>;
   startLobby: () => Promise<void>;
 }
 
-const fresh = (seed?: number) => createGame({ seed, humans: [{ id: ME, name: MY_NAME }] });
+const fresh = (seed?: number, chapterId?: string) =>
+  createGame({
+    seed,
+    humans: [{ id: ME, name: kingdomName(chapterId) }],
+    chapter: chapterId ? getChapterById(chapterId) : undefined,
+  });
 
 export const useStore = create<Store>((set, get) => ({
   state: fresh(),
@@ -178,13 +190,13 @@ export const useStore = create<Store>((set, get) => ({
     }, 2800);
   },
 
-  newGame(seed) {
+  newGame(seed, chapterId) {
     if (get().mode === 'server') {
-      void get().goOnline(seed);
+      void get().goOnline(seed, chapterId);
       return;
     }
     void clearSave();
-    const state = fresh(seed);
+    const state = fresh(seed, chapterId);
     set({ state, sel: null, tab: 'info', modals: [{ kind: 'intro' }], toast: null });
     void saveGame(state);
   },
@@ -217,12 +229,12 @@ export const useStore = create<Store>((set, get) => ({
     else set({ loaded: true });
   },
 
-  async goOnline(seed) {
+  async goOnline(seed, chapterId) {
     get().socket?.close();
     set({ connection: 'connecting', socket: null });
     try {
       await ensureSession();
-      const created = await createServerGame({ seed, name: MY_NAME });
+      const created = await createServerGame({ seed, name: kingdomName(chapterId), chapterId });
       enterServer(
         set,
         get,
@@ -252,12 +264,12 @@ export const useStore = create<Store>((set, get) => ({
     }
   },
 
-  async createLobby(seasonTimerSeconds) {
+  async createLobby(seasonTimerSeconds, chapterId) {
     if (get().lobbyBusy) return;
     set({ lobbyBusy: true });
     try {
       await ensureSession();
-      const lobby = await createServerLobby({ name: MY_NAME, seasonTimerSeconds });
+      const lobby = await createServerLobby({ name: kingdomName(chapterId), seasonTimerSeconds, chapterId });
       set({ lobby });
       startLobbyPolling(get);
     } catch (err) {

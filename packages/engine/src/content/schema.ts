@@ -40,6 +40,23 @@ export interface ChapterManifest {
   yearsLabel: string;
   /** one-paragraph blurb */
   summary: string;
+  /**
+   * false = content is Claude's draft, not yet checked by the historian ROADMAP.md calls for;
+   * the UI labels such chapters "ร่าง". Every chapter so far is false.
+   */
+  historianReviewed: boolean;
+}
+
+/**
+ * Era-specific text the chassis shows but that is not a mechanic — a 19th-century gunboat
+ * makes no sense in the 13th century. `{P}` = a foreign power's name, `{capital}` = the
+ * player's capital, `{years}` = game length in years.
+ */
+export interface ChapterFlavorData {
+  /** when a foreign power's patience runs out (the ultimatum decision) */
+  ultimatum: { icon: string; title: string; text: string; arrivedLog: string; paidChronicle: string };
+  /** first-game intro modal */
+  intro: { kicker: string; heading: string; body: string };
 }
 
 export interface ResourceLabel {
@@ -215,6 +232,7 @@ export interface ChapterDefinition {
   seats: readonly SeatDefData[];
   /** name pool `found` draws from, cycling in order (see actions.ts) */
   newCityNames: readonly string[];
+  flavor: ChapterFlavorData;
 }
 
 export class ChapterValidationError extends Error {
@@ -278,6 +296,9 @@ export function validateChapterDefinition(def: ChapterDefinition): void {
   }
 
   if (!def.newCityNames?.length) issues.push('newCityNames must have at least one entry');
+  if (!def.flavor?.ultimatum?.title || !def.flavor?.intro?.heading) {
+    issues.push('flavor.ultimatum and flavor.intro are required');
+  }
 
   if (!def.seats?.length) issues.push('seats must have at least one entry');
   def.seats?.forEach((seat, i) => {

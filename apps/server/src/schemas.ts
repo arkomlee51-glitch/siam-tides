@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CHAPTERS } from '@siam/engine';
 import type { Action, BuildingId, DecisionChoice, PowerId } from '@siam/engine';
 
 /* ---------- ตรวจว่า schema ตรงกับชนิดใน engine ตอน typecheck ---------- */
@@ -39,11 +40,18 @@ export const ActionSchema = z.discriminatedUnion('type', [
 export type _ActionSchemaMatchesEngine = Assert<Equals<z.infer<typeof ActionSchema>, Action>>;
 
 /* ---------- requests ---------- */
+/** บทที่ลงทะเบียนในเอนจินเท่านั้น (ADR-0009) — ไม่ส่ง = บท default */
+const ChapterIdField = z
+  .string()
+  .refine((id) => Object.hasOwn(CHAPTERS, id), { message: 'ไม่รู้จักบทนี้' })
+  .optional();
+
 export const CreateGameBody = z.object({
   seed: z.coerce.number().int().min(0).max(0xffffffff).optional(),
   maxTurn: z.coerce.number().int().min(1).max(120).optional(),
   /** ชื่ออาณาจักรของผู้สร้าง (ที่นั่ง p1) — ที่นั่งอื่นเป็น AI จนกว่าจะมีห้องรอ/รหัสเชิญในเฟส 5 */
   name: z.string().trim().min(1).max(40).optional(),
+  chapterId: ChapterIdField,
 });
 export type CreateGameInput = z.infer<typeof CreateGameBody>;
 
@@ -68,6 +76,7 @@ export const CreateLobbyBody = z.object({
   name: z.string().trim().min(1).max(40).optional(),
   /** จำกัดเวลาต่อฤดู (วินาที) — ถ้าตั้งไว้ ใครไม่กด endTurn ทันเวลาจะถูกบังคับ endTurn แทน ไม่ตั้ง = ไม่จำกัดเวลา */
   seasonTimerSeconds: z.coerce.number().int().min(30).max(604800).optional(),
+  chapterId: ChapterIdField,
 });
 export type CreateLobbyInput = z.infer<typeof CreateLobbyBody>;
 

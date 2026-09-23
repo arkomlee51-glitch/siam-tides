@@ -66,7 +66,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-export const createGame = (body: { seed?: number; maxTurn?: number; name?: string }) =>
+export const createGame = (body: { seed?: number; maxTurn?: number; name?: string; chapterId?: string }) =>
   request<CreatedGame>('/games', { method: 'POST', body: JSON.stringify(body) });
 
 export const fetchGame = (gameId: string) => request<Snapshot>(`/games/${gameId}`, { method: 'GET' });
@@ -108,6 +108,8 @@ export interface Lobby {
   startedGameId: string | null;
   /** จำกัดเวลาต่อฤดู (วินาที) — undefined = ไม่จำกัด */
   seasonTimerSeconds?: number;
+  /** บทที่จะเล่น (ADR-0009) */
+  chapterId?: string;
 }
 
 export const createLobby = (body: {
@@ -115,6 +117,7 @@ export const createLobby = (body: {
   maxTurn?: number;
   name?: string;
   seasonTimerSeconds?: number;
+  chapterId?: string;
 }) => request<Lobby>('/lobbies', { method: 'POST', body: JSON.stringify(body) });
 
 export const fetchLobby = (code: string) => request<Lobby>(`/lobbies/${code}`, { method: 'GET' });

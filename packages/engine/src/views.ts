@@ -46,9 +46,9 @@ export function describeDecision(s: GameState, d: PendingDecision): DecisionInfo
     return {
       id: d.id,
       powerName: P.name,
-      powerIcon: '⚓',
-      title: 'เรือปืนปิดปากแม่น้ำ',
-      text: `ความอดทนของ${P.name}หมดลง เรือรบทอดสมออยู่หน้าเมืองและรอคำตอบก่อนพลบค่ำ`,
+      powerIcon: chapter.flavor.ultimatum.icon,
+      title: chapter.flavor.ultimatum.title,
+      text: chapter.flavor.ultimatum.text.replace('{P}', P.name),
       options: [
         {
           choice: 'pay',

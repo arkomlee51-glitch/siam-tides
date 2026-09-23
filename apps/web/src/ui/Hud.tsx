@@ -7,12 +7,12 @@ import type { ThemeMode } from '../theme';
 
 export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () => void }) {
   const state = useStore((s) => s.state);
-  const newGame = useStore((s) => s.newGame);
   const pushModal = useStore((s) => s.pushModal);
   const online = useStore((s) => s.mode === 'server');
   const connection = useStore((s) => s.connection);
   const inFlight = useStore((s) => s.inFlight);
-  const labels = chapterOf(state).resourceLabels;
+  const chapter = chapterOf(state);
+  const labels = chapter.resourceLabels;
   const goOnline = useStore((s) => s.goOnline);
   const goOffline = useStore((s) => s.goOffline);
   const me = state.factions[ME]!;
@@ -32,7 +32,11 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
       <div className="titlebar">
         <div>
           <h1>สยาม: กระแสแห่งราชอาณาจักร</h1>
-          <p>บทไผ่ลู่ลม สิบปี สามฤดูต่อปี</p>
+          <p>
+            บท{chapter.manifest.name}
+            {chapter.manifest.historianReviewed ? '' : ' (ร่าง)'} · {Math.ceil(state.maxTurn / 3)} ปี
+            สามฤดูต่อปี
+          </p>
         </div>
         <div className="tbtns">
           <button className="btn icon" onClick={onCycleTheme}>
@@ -65,7 +69,7 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
           >
             เล่นหลายคน
           </button>
-          <button className="btn icon" onClick={() => newGame()}>
+          <button className="btn icon" onClick={() => pushModal({ kind: 'newGame' })}>
             เริ่มใหม่
           </button>
         </div>

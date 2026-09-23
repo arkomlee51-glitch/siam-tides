@@ -104,7 +104,9 @@ export function BambooTab() {
           ฤดูจะได้ตอนจบใต้ร่มเงา แถบจะคืนเข้าหากลางทีละ 1 ทุกฤดู
         </p>
       </div>
-      <p className="small">{upcoming} ปฏิเสธบ่อยจนความอดทนหมด จะเจอคำขาดเรือปืน</p>
+      <p className="small">
+        {upcoming} ปฏิเสธบ่อยจนความอดทนหมด จะเจอคำขาด "{chapter.flavor.ultimatum.title}"
+      </p>
       {powerIds.map((pid) => (
         <div className="card" key={pid}>
           <div className="ch">

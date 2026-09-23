@@ -65,6 +65,7 @@ export class GameService {
       input.seed,
       input.maxTurn,
       undefined,
+      input.chapterId,
     );
   }
 
@@ -74,8 +75,9 @@ export class GameService {
     seed: number | undefined,
     maxTurn: number | undefined,
     seasonTimerSeconds: number | undefined,
+    chapterId?: string,
   ): Promise<CreatedGame> {
-    return this.createWithHumans(seats, seed, maxTurn, seasonTimerSeconds);
+    return this.createWithHumans(seats, seed, maxTurn, seasonTimerSeconds, chapterId);
   }
 
   private async createWithHumans(
@@ -83,6 +85,8 @@ export class GameService {
     seed: number | undefined,
     maxTurn: number | undefined,
     seasonTimerSeconds: number | undefined,
+    /** undefined = บท default; ต้องเป็นบทที่ลงทะเบียนแล้ว (schema ตรวจไว้ก่อนถึงตรงนี้) */
+    chapterId: string | undefined,
   ): Promise<CreatedGame> {
     // Legacy: ผู้เล่นแต่ละคนได้โบนัสจากบทล่าสุดที่ตัวเองเล่นจบ (ADR-0007 Addendum 9)
     let legacyByUser: Map<string, LegacyRecord>;
@@ -103,6 +107,7 @@ export class GameService {
       seed,
       maxTurn,
       humans: humans.map((h, i) => ({ id: `p${i + 1}`, name: h.name, legacy: legacyFor(h.userId) })),
+      chapter: chapterId ? getChapterById(chapterId) : undefined,
     });
     const userIdByFaction = new Map<string, string>(humans.map((h, i) => [`p${i + 1}`, h.userId]));
     const owner = state.factions['p1'];

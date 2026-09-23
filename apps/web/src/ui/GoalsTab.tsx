@@ -1,4 +1,4 @@
-import { LEGACY_CATEGORIES, LEGACY_LABELS, endingProgress } from '@siam/engine';
+import { LEGACY_CATEGORIES, LEGACY_LABELS, capitalOf, endingProgress } from '@siam/engine';
 import type { EndingId } from '@siam/engine';
 import { ME, useStore } from '../store';
 import { chapterOf } from './format';
@@ -54,7 +54,7 @@ export function GoalsTab() {
       <p className="muted small">
         ตัดสินตอนจบเมื่อครบ {state.maxTurn} เทิร์น โดยตรวจจากบนลงล่าง เข้าเงื่อนไขข้อไหนก่อนได้ตอนจบนั้น
       </p>
-      {card('ashes', [item('', 'เสียกรุงนทีเมื่อไร เกมจบทันที')])}
+      {card('ashes', [item('', `เสีย${capitalOf(state, ME)?.name ?? 'เมืองหลวง'}เมื่อไร เกมจบทันที`)])}
       {card('shadow', [
         item(
           p.shadow.sovereignty < 40 ? 'hit' : '',

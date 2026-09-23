@@ -1,4 +1,5 @@
 import { earlyRattanakosinChapter } from './early-rattanakosin.js';
+import { sukhothaiAyutthayaChapter } from './sukhothai-ayutthaya.js';
 import type { ChapterDefinition } from '../schema.js';
 
 /**
@@ -13,7 +14,16 @@ import type { ChapterDefinition } from '../schema.js';
  */
 export const CHAPTERS: Record<string, ChapterDefinition> = {
   [earlyRattanakosinChapter.manifest.id]: earlyRattanakosinChapter,
+  [sukhothaiAyutthayaChapter.manifest.id]: sukhothaiAyutthayaChapter,
 };
+
+/** Every registered chapter in campaign order (`manifest.order`) — for chapter pickers. */
+export const CHAPTER_LIST: readonly ChapterDefinition[] = Object.values(CHAPTERS).sort(
+  (a, b) => a.manifest.order - b.manifest.order,
+);
+
+/** The chapter a game uses when none is chosen — the one that shipped before Phase 6. */
+export const DEFAULT_CHAPTER_ID = earlyRattanakosinChapter.manifest.id;
 
 /**
  * Throws if `id` isn't registered — a `GameState` should never reference an unknown

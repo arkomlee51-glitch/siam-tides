@@ -30,7 +30,8 @@ function queueUltimatum(ctx: Ctx, f: Faction, power: PowerId): void {
   const chapter = getChapterById(ctx.s.chapterId);
   const P = chapter.foreignPowers[power]!;
   ctx.s.pending.push({ id: newId(ctx.s, 'd'), faction: f.id, power, kind: 'ultimatum', demand: -1 });
-  emit(ctx, [f.id], 'power', 'bad', `⚓ เรือปืนของ${P.name}ปิดปากแม่น้ำ`);
+  const U = chapter.flavor.ultimatum;
+  emit(ctx, [f.id], 'power', 'bad', `${U.icon} ${U.arrivedLog.replace('{P}', P.name)}`);
 }
 
 export const negotiateCost = (s: GameState): Cost => {
@@ -110,7 +111,7 @@ export function answerDecision(
     pay(f.res, cost);
     pw.patience = 2;
     emit(ctx, [f.id], 'power', 'warn', `จ่ายค่าชดเชยให้${P.name}`);
-    chronicle(s, f.id, 'จ่ายค่าชดเชยเพื่อคลี่คลายวิกฤตเรือปืน');
+    chronicle(s, f.id, chapter.flavor.ultimatum.paidChronicle.replace('{P}', P.name));
   } else {
     f.sovereignty = clamp(f.sovereignty - 15, 0, 100);
     shiftMeter(f, d.power, 30, chapter);
