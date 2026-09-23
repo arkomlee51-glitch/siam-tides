@@ -20,7 +20,10 @@ interface Frame {
   [key: string]: unknown;
 }
 
-async function connect(instance: FastifyInstance, url: string): Promise<{ socket: WebSocket; frames: Frame[] }> {
+async function connect(
+  instance: FastifyInstance,
+  url: string,
+): Promise<{ socket: WebSocket; frames: Frame[] }> {
   const frames: Frame[] = [];
   const socket = (await instance.injectWS(url, undefined, {
     onInit: (ws) => {
@@ -100,7 +103,9 @@ describe('WebSocket หลายคนพร้อมกัน — ต่อ, �
     const { gameId, users } = await startFourHumanGame(app, { seed: 5 });
 
     const conns = await Promise.all(
-      users.map((u, i) => connect(app!, `/games/${gameId}/ws?token=${u}`).then((c) => ({ ...c, faction: `p${i + 1}` }))),
+      users.map((u, i) =>
+        connect(app!, `/games/${gameId}/ws?token=${u}`).then((c) => ({ ...c, faction: `p${i + 1}` })),
+      ),
     );
     for (const c of conns) {
       const sync = await waitFor(() => c.frames.find((f) => f.type === 'sync'), `sync ของ ${c.faction}`);
@@ -117,7 +122,10 @@ describe('WebSocket หลายคนพร้อมกัน — ต่อ, �
     expect(res.statusCode).toBe(200);
 
     for (const c of conns) {
-      const update = await waitFor(() => c.frames.find((f) => f.type === 'update'), `update ของ ${c.faction}`);
+      const update = await waitFor(
+        () => c.frames.find((f) => f.type === 'update'),
+        `update ของ ${c.faction}`,
+      );
       expect(update.version).toBe(1);
     }
   });
@@ -147,7 +155,10 @@ describe('WebSocket หลายคนพร้อมกัน — ต่อ, �
 
     // p2 กลับมา ต่อ WS ใหม่ (คนละ connection จากเดิม จำลองแอปเปิดใหม่/เน็ตกลับมา)
     const c2Again = await connect(app, `/games/${gameId}/ws?token=${u2}`);
-    const resync = await waitFor(() => c2Again.frames.find((f) => f.type === 'sync'), 'sync ของ p2 หลังต่อใหม่');
+    const resync = await waitFor(
+      () => c2Again.frames.find((f) => f.type === 'sync'),
+      'sync ของ p2 หลังต่อใหม่',
+    );
     expect(resync.factionId).toBe('p2');
     expect(resync.version).toBe(3); // เห็นคำสั่งทั้งสามที่เกิดระหว่างหลุดสายครบ ไม่ตกหล่น
     expect((resync.view as GameState).turn).toBe(1);

@@ -1,4 +1,13 @@
-import type { CreateGameInput, Db, DbActionEntry, DbGame, DbSeat, DbSnapshot, ReplayData } from './types.js';
+import type {
+  CreateGameInput,
+  Db,
+  DbActionEntry,
+  DbGame,
+  DbSeat,
+  DbSnapshot,
+  LegacyRecord,
+  ReplayData,
+} from './types.js';
 
 /**
  * Db ในหน่วยความจำสำหรับ test และการพัฒนาที่ไม่ได้ต่อ Supabase จริง
@@ -9,6 +18,11 @@ export function createMemoryDb(): Db {
   const seats = new Map<string, DbSeat[]>();
   const actions = new Map<string, DbActionEntry[]>();
   const snapshots = new Map<string, DbSnapshot[]>();
+  /** key = `${userId}|${chapterId}` เหมือน primary key ของ player_legacy */
+  const legacy = new Map<string, LegacyRecord>();
+  /** ลำดับการเขียน — ตัดสิน "ล่าสุด" ได้แน่นอนแม้สองแถวเขียนใน millisecond เดียวกัน */
+  const legacyOrder = new Map<string, number>();
+  let legacySeq = 0;
 
   return {
     kind: 'memory',
@@ -21,6 +35,8 @@ export function createMemoryDb(): Db {
         seed: input.seed ?? null,
         engineVersion: input.engineVersion,
         maxTurn: input.maxTurn ?? null,
+        chapterId: input.chapterId,
+        seasonTimerSeconds: input.seasonTimerSeconds ?? null,
         createdBy: input.createdBy,
         createdAt: now,
         finishedAt: null,
@@ -65,6 +81,26 @@ export function createMemoryDb(): Db {
         snapshot: latest ? structuredClone(latest) : null,
         actionsSinceSnapshot: structuredClone(since),
       };
+    },
+
+    async upsertLegacy(records) {
+      for (const r of records) {
+        const key = `${r.userId}|${r.chapterId}`;
+        legacy.set(key, structuredClone({ ...r, computedAt: new Date().toISOString() }));
+        legacyOrder.set(key, ++legacySeq);
+      }
+    },
+
+    async loadLatestLegacy(userIds) {
+      const wanted = new Set(userIds);
+      const best = new Map<string, { record: LegacyRecord; order: number }>();
+      for (const [key, r] of legacy) {
+        if (!wanted.has(r.userId)) continue;
+        const order = legacyOrder.get(key) ?? 0;
+        const prev = best.get(r.userId);
+        if (!prev || order > prev.order) best.set(r.userId, { record: r, order });
+      }
+      return new Map([...best].map(([userId, { record }]) => [userId, structuredClone(record)]));
     },
 
     async markFinished(gameId: string, endingByFactionId: Record<string, string>) {

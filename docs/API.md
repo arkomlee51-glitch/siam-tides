@@ -18,10 +18,10 @@ Base URL ตอนพัฒนา: `http://localhost:8787` (ตั้งได�
 sign-in (ไม่ต้องสมัครสมาชิกก่อน) แล้วค่อยผูกอีเมลทีหลังก็ได้ — ส่ง access token มากับคำขอได้สามทาง
 (รูปแบบเดิมจากเฟส 3 ทุกประการ endpoint และ error ไม่เปลี่ยน)
 
-| ที่    | ตัวอย่าง                                                               |
-| ------ | ---------------------------------------------------------------------- |
-| header | `Authorization: Bearer <access_token>`                                 |
-| header | `x-player-token: <access_token>`                                       |
+| ที่    | ตัวอย่าง                                                                      |
+| ------ | ----------------------------------------------------------------------------- |
+| header | `Authorization: Bearer <access_token>`                                        |
+| header | `x-player-token: <access_token>`                                              |
 | query  | `?token=<access_token>` (ใช้กับ WebSocket เพราะเบราว์เซอร์ตั้ง header ไม่ได้) |
 
 server ตรวจ JWT ด้วย JWKS ของ `SUPABASE_URL` เป็นค่าเริ่มต้น (asymmetric, ไม่ต้องมี secret ฝั่ง server)
@@ -225,8 +225,8 @@ Supabase — ถ้าเกิด cold-start replay (Redis หมดอาย�
 | 429  | `RATE_LIMITED`        | ส่งถี่เกิน `details.resetSeconds` บอกเวลาที่ต้องรอ                                         |
 | 503  | `LOCK_TIMEOUT`        | รอ lock ของเกมนานเกิน `LOCK_WAIT_MS`                                                       |
 | 503  | `STORE_UNAVAILABLE`   | `/readyz` ต่อ store ไม่ได้                                                                 |
-| 404  | `LOBBY_NOT_FOUND`     | ไม่มีห้องรอรหัสนี้ หรือหมดอายุแล้ว                                                          |
-| 422  | `LOBBY_FULL`          | ห้องรอเต็มแล้ว (4 คน)                                                                       |
+| 404  | `LOBBY_NOT_FOUND`     | ไม่มีห้องรอรหัสนี้ หรือหมดอายุแล้ว                                                         |
+| 422  | `LOBBY_FULL`          | ห้องรอเต็มแล้ว (4 คน)                                                                      |
 | 409  | `LOBBY_STARTED`       | ห้องรอนี้เริ่มเกมไปแล้ว — `details.gameId` มี id ของเกมให้ไปต่อ                            |
 
 ## ลำดับการประมวลผลคำสั่ง

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
+import { CHAPTER_LIST, DEFAULT_CHAPTER_ID, getChapterById } from '@siam/engine';
 import { useStore } from '../store';
 import { currentUser } from '../api/supabase';
 
@@ -14,6 +15,7 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
   const [code, setCode] = useState('');
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [timerMinutes, setTimerMinutes] = useState(0);
+  const [chapterId, setChapterId] = useState(DEFAULT_CHAPTER_ID);
 
   useEffect(() => {
     void currentUser().then((u) => setMyUserId(u?.id ?? null));
@@ -35,7 +37,20 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
             <h2>สร้างห้องหรือใส่รหัสเชิญ</h2>
           </div>
         </div>
-        <p className="hint">ชวนเพื่อนได้สูงสุด {MAX_SEATS} คน แต่ละคนได้แคว้นของตัวเอง ที่นั่งที่เหลือเป็น AI</p>
+        <p className="hint">
+          ชวนเพื่อนได้สูงสุด {MAX_SEATS} คน แต่ละคนได้แคว้นของตัวเอง ที่นั่งที่เหลือเป็น AI
+        </p>
+        <label className="acct-form">
+          <span className="muted small">บทที่จะเล่น</span>
+          <select className="acct-input" value={chapterId} onChange={(e) => setChapterId(e.target.value)}>
+            {CHAPTER_LIST.map((c) => (
+              <option key={c.manifest.id} value={c.manifest.id}>
+                บทที่ {c.manifest.order}: {c.manifest.name}
+                {c.manifest.historianReviewed ? '' : ' (ร่าง)'}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="acct-form">
           <span className="muted small">จำกัดเวลาต่อฤดู (นาที, 0 = ไม่จำกัด)</span>
           <input
@@ -52,7 +67,7 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
           <button
             className="btn"
             disabled={lobbyBusy}
-            onClick={() => void createLobby(timerMinutes > 0 ? timerMinutes * 60 : undefined)}
+            onClick={() => void createLobby(timerMinutes > 0 ? timerMinutes * 60 : undefined, chapterId)}
           >
             สร้างห้องใหม่
           </button>
@@ -92,7 +107,8 @@ export function LobbyPanel({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <p className="hint">
-        ส่งรหัสนี้ให้เพื่อน — เข้าร่วมได้สูงสุด {MAX_SEATS} คน ({lobby.seats.length}/{MAX_SEATS} คนแล้ว)
+        บท{getChapterById(lobby.chapterId ?? DEFAULT_CHAPTER_ID).manifest.name} — ส่งรหัสนี้ให้เพื่อน —
+        เข้าร่วมได้สูงสุด {MAX_SEATS} คน ({lobby.seats.length}/{MAX_SEATS} คนแล้ว)
       </p>
       <ul className="acct-games lobby-seats">
         {seats.map((seat, i) => (

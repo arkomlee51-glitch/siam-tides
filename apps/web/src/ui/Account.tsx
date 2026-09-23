@@ -91,7 +91,9 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
 
       {!identity?.email && (
         <>
-          <p className="hint">ผูกอีเมลไว้เพื่อเล่นต่อจากเครื่องอื่นได้ — เกมและเซฟปัจจุบันจะยังอยู่เหมือนเดิม</p>
+          <p className="hint">
+            ผูกอีเมลไว้เพื่อเล่นต่อจากเครื่องอื่นได้ — เกมและเซฟปัจจุบันจะยังอยู่เหมือนเดิม
+          </p>
           <form className="acct-form" onSubmit={(e) => void submitEmail(e)}>
             <input
               className="acct-input"
@@ -113,7 +115,9 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
       <h3>เกมของฉัน</h3>
       {games === null && <p className="muted small">กำลังโหลด…</p>}
       {games !== null && games.length === 0 && (
-        <p className="muted small">ยังไม่มีเกมที่เล่นผ่าน server — กด &ldquo;เล่นผ่าน server&rdquo; ที่แถบด้านบนเพื่อเริ่ม</p>
+        <p className="muted small">
+          ยังไม่มีเกมที่เล่นผ่าน server — กด &ldquo;เล่นผ่าน server&rdquo; ที่แถบด้านบนเพื่อเริ่ม
+        </p>
       )}
       {games !== null && games.length > 0 && (
         <ul className="acct-games">
@@ -121,7 +125,9 @@ export function AccountPanel({ onClose }: { onClose: () => void }) {
             <li key={`${g.gameId}:${g.factionId}`}>
               <div>
                 <b>{g.name}</b>
-                <small>{g.status === 'finished' ? 'จบแล้ว' : g.status === 'lobby' ? 'ห้องรอ' : 'กำลังเล่น'}</small>
+                <small>
+                  {g.status === 'finished' ? 'จบแล้ว' : g.status === 'lobby' ? 'ห้องรอ' : 'กำลังเล่น'}
+                </small>
               </div>
               <button
                 className="btn sm"

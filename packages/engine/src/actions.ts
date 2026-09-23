@@ -1,4 +1,5 @@
-import { BUILDINGS, COSTS, NEW_CITY_NAMES, RULES } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
+import type { ChapterDefinition } from './content/schema.js';
 import { resolveBattle } from './combat.js';
 import { canPay, pay, scaleCost } from './economy.js';
 import { hexDistance, isCoastal, key, terrainAt } from './hex.js';
@@ -20,6 +21,7 @@ import {
 } from './state.js';
 import type { Ctx } from './state.js';
 import { resolveSeason } from './turn.js';
+import { fmtCost } from './views.js';
 import type { Action, ActionError, ActionResult, Army, Faction, FactionId, GameState } from './types.js';
 
 export const ERROR_MESSAGES: Record<ActionError, string> = {
@@ -57,11 +59,12 @@ function ownArmy(s: GameState, f: Faction, id: string): Army | ActionError {
 
 /** Why an army can't found a city here, or null if it can. */
 export function foundBlocker(s: GameState, a: Army): string | null {
+  const chapter = getChapterById(s.chapterId);
   const t = terrainAt(a.c, a.r);
   if (!t || t === 'M') return 'ตั้งเมืองบนเทือกเขาไม่ได้';
   if (cityAt(s, a.c, a.r)) return 'ช่องนี้มีเมืองอยู่แล้ว';
-  if (s.cities.some((c) => hexDistance([c.c, c.r], [a.c, a.r]) < RULES.cityMinDistance))
-    return `ต้องห่างจากเมืองอื่นอย่างน้อย ${RULES.cityMinDistance} ช่อง`;
+  if (s.cities.some((c) => hexDistance([c.c, c.r], [a.c, a.r]) < chapter.rules.cityMinDistance))
+    return `ต้องห่างจากเมืองอื่นอย่างน้อย ${chapter.rules.cityMinDistance} ช่อง`;
   return null;
 }
 
@@ -70,7 +73,39 @@ function aiTarget(s: GameState, target: FactionId): Faction | null {
   return t && t.kind === 'ai' && t.alive ? t : null;
 }
 
-type Handler<A extends Action> = (ctx: Ctx, f: Faction, a: A) => ActionError | null;
+/** Any other living faction, AI or human. */
+function otherTarget(s: GameState, f: Faction, target: FactionId): Faction | null {
+  const t = s.factions[target];
+  return t && t.alive && t.id !== f.id ? t : null;
+}
+
+/**
+ * `from` joins `into` peacefully: cities and armies change hands, `from` leaves the game.
+ * Shared by paying to annex an AI and a human accepting a union proposal (ADR-0008).
+ */
+function absorbFaction(ctx: Ctx, into: Faction, from: Faction): void {
+  const s = ctx.s;
+  for (const c of s.cities) if (c.owner === from.id) Object.assign(c, { owner: into.id, capital: false });
+  for (const army of s.armies)
+    if (army.owner === from.id) Object.assign(army, { owner: into.id, mp: 0, moved: true });
+  from.alive = false;
+  for (const other of Object.values(s.factions))
+    if (other.id !== from.id) relation(s, other.id, from.id).war = false;
+  s.pending = s.pending.filter((d) => d.faction !== from.id);
+  s.proposals = (s.proposals ?? []).filter((x) => x.from !== from.id && x.to !== from.id);
+  s.ready = s.ready.filter((x) => x !== from.id);
+  into.stats.annexed++;
+  into.stability = clamp(into.stability + 5, 0, 100);
+  emit(ctx, null, 'diplomacy', 'good', `🤝 ${from.name}เข้าร่วมกับ${into.name}โดยสันติ`);
+  chronicle(s, into.id, `${from.name}เข้าร่วมแผ่นดินโดยสันติ`);
+}
+
+type Handler<A extends Action> = (
+  ctx: Ctx,
+  f: Faction,
+  a: A,
+  chapter: ChapterDefinition,
+) => ActionError | null;
 type Handlers = { [K in Action['type']]: Handler<Extract<Action, { type: K }>> };
 
 const handlers: Handlers = {
@@ -110,15 +145,16 @@ const handlers: Handlers = {
     return null;
   },
 
-  found(ctx, f, a) {
+  found(ctx, f, a, chapter) {
     const s = ctx.s;
     const army = ownArmy(s, f, a.armyId);
     if (typeof army === 'string') return army;
     if (foundBlocker(s, army)) return 'INVALID_LOCATION';
-    const cost = scaleCost(COSTS.found, seasonOf(s.turn).build);
+    const cost = scaleCost(chapter.costs.found ?? {}, seasonOf(s.turn).build);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
-    const name = NEW_CITY_NAMES[s.cityNameIdx++ % NEW_CITY_NAMES.length]!;
+    const names = chapter.newCityNames;
+    const name = names[s.cityNameIdx++ % names.length]!;
     s.cities.push({
       id: newId(s, 'c'),
       name,
@@ -127,8 +163,8 @@ const handlers: Handlers = {
       owner: f.id,
       capital: false,
       buildings: [],
-      garrison: RULES.newCityGarrison,
-      baseGarrison: RULES.newCityBaseGarrison,
+      garrison: chapter.rules.newCityGarrison,
+      baseGarrison: chapter.rules.newCityBaseGarrison,
     });
     army.mp = 0;
     army.moved = true;
@@ -145,11 +181,11 @@ const handlers: Handlers = {
     return null;
   },
 
-  build(ctx, f, a) {
+  build(ctx, f, a, chapter) {
     const city = ctx.s.cities.find((c) => c.id === a.cityId);
     if (!city) return 'NOT_FOUND';
     if (city.owner !== f.id) return 'NOT_OWNER';
-    const def = BUILDINGS[a.building];
+    const def = chapter.buildings[a.building];
     if (!def) return 'INVALID_TARGET';
     if (city.buildings.includes(a.building)) return 'ALREADY_BUILT';
     if (def.coastalOnly && !isCoastal(city.c, city.r)) return 'NOT_COASTAL';
@@ -162,26 +198,26 @@ const handlers: Handlers = {
     return null;
   },
 
-  recruit(ctx, f, a) {
+  recruit(ctx, f, a, chapter) {
     const s = ctx.s;
     const city = s.cities.find((c) => c.id === a.cityId);
     if (!city) return 'NOT_FOUND';
     if (city.owner !== f.id) return 'NOT_OWNER';
     const here = armyAt(s, city.c, city.r);
-    if (here && here.str >= RULES.armyCap) return 'ARMY_FULL';
-    const cost = scaleCost(COSTS.recruit, seasonOf(s.turn).recruit);
+    if (here && here.str >= chapter.rules.armyCap) return 'ARMY_FULL';
+    const cost = scaleCost(chapter.costs.recruit ?? {}, seasonOf(s.turn).recruit);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
     if (here) {
-      here.str = Math.min(RULES.armyCap, here.str + RULES.recruitReinforce);
-      emit(ctx, [f.id], 'army', 'good', `เสริมกำลังทัพที่${city.name} +${RULES.recruitReinforce}`);
+      here.str = Math.min(chapter.rules.armyCap, here.str + chapter.rules.recruitReinforce);
+      emit(ctx, [f.id], 'army', 'good', `เสริมกำลังทัพที่${city.name} +${chapter.rules.recruitReinforce}`);
     } else {
       s.armies.push({
         id: newId(s, 'a'),
         owner: f.id,
         c: city.c,
         r: city.r,
-        str: RULES.recruitNew,
+        str: chapter.rules.recruitNew,
         morale: 70,
         mp: 0,
         moved: true,
@@ -191,45 +227,72 @@ const handlers: Handlers = {
     return null;
   },
 
-  tribute(ctx, f, a) {
-    return improveRelation(ctx, f, a.target, COSTS.tribute, RULES.tributeGain, 'ส่งบรรณาการ');
+  tribute(ctx, f, a, chapter) {
+    // to a human, the tribute is a real gift: they receive what you paid (ADR-0008)
+    return improveRelation(
+      ctx,
+      f,
+      a.target,
+      chapter.costs.tribute ?? {},
+      chapter.rules.tributeGain,
+      'ส่งบรรณาการ',
+      'ส่งบรรณาการให้คุณ',
+      true,
+    );
   },
 
-  festival(ctx, f, a) {
-    return improveRelation(ctx, f, a.target, COSTS.festival, RULES.festivalGain, 'จัดงานบุญร่วมกับ');
+  festival(ctx, f, a, chapter) {
+    return improveRelation(
+      ctx,
+      f,
+      a.target,
+      chapter.costs.festival ?? {},
+      chapter.rules.festivalGain,
+      'จัดงานบุญร่วมกับ',
+      'จัดงานบุญร่วมกับคุณ',
+      false,
+    );
   },
 
-  annex(ctx, f, a) {
+  annex(ctx, f, a, chapter) {
     const s = ctx.s;
-    const t = aiTarget(s, a.target);
+    const t = otherTarget(s, f, a.target);
     if (!t) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (rel.war) return 'AT_WAR';
-    if (rel.rel < RULES.annexThreshold) return 'RELATION_TOO_LOW';
-    const cost = scaleCost(COSTS.annex, seasonOf(s.turn).diplo);
+    if (rel.rel < chapter.rules.annexThreshold) return 'RELATION_TOO_LOW';
+    const cost = scaleCost(chapter.costs.annex ?? {}, seasonOf(s.turn).diplo);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
+    if (t.kind === 'human') {
+      // a human is never annexed by payment — it becomes a union proposal only they can accept;
+      // the cost is paid on acceptance, not now (ADR-0008)
+      s.proposals = (s.proposals ?? []).filter(
+        (x) => !(x.from === f.id && x.to === t.id && x.kind === 'union'),
+      );
+      s.proposals.push({ id: newId(s, 'pr'), kind: 'union', from: f.id, to: t.id, turn: s.turn });
+      emit(ctx, [t.id], 'diplomacy', 'info', `🤝 ${f.name}เสนอรวมแผ่นดินกับคุณ รอคำตอบ`);
+      emit(ctx, [f.id], 'diplomacy', 'info', `ส่งข้อเสนอรวมแผ่นดินถึง${t.name}แล้ว รอคำตอบ`);
+      chronicle(s, f.id, `เสนอรวมแผ่นดินกับ${t.name}`);
+      return null;
+    }
     pay(f.res, cost);
-    for (const c of s.cities) if (c.owner === t.id) Object.assign(c, { owner: f.id, capital: false });
-    for (const army of s.armies)
-      if (army.owner === t.id) Object.assign(army, { owner: f.id, mp: 0, moved: true });
-    t.alive = false;
-    for (const other of Object.values(s.factions))
-      if (other.id !== t.id) relation(s, other.id, t.id).war = false;
-    f.stats.annexed++;
-    f.stability = clamp(f.stability + 5, 0, 100);
-    emit(ctx, null, 'diplomacy', 'good', `🤝 ${t.name}เข้าร่วมกับ${f.name}โดยสันติ`);
-    chronicle(s, f.id, `${t.name}เข้าร่วมแผ่นดินโดยสันติ`);
+    absorbFaction(ctx, f, t);
     return null;
   },
 
-  declareWar(ctx, f, a) {
+  declareWar(ctx, f, a, chapter) {
     const s = ctx.s;
     const t = s.factions[a.target];
     if (!t || !t.alive || t.id === f.id) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (rel.war) return 'AT_WAR';
     rel.war = true;
-    rel.rel = Math.min(rel.rel, RULES.warRelationCap);
+    rel.rel = Math.min(rel.rel, chapter.rules.warRelationCap);
+    // a pending union offer between the two is moot once they are at war (ADR-0008)
+    s.proposals = (s.proposals ?? []).filter(
+      (x) =>
+        !(x.kind === 'union' && ((x.from === f.id && x.to === t.id) || (x.from === t.id && x.to === f.id))),
+    );
     f.stability = clamp(f.stability - 5, 0, 100);
     for (const ai of aiFactions(s)) {
       if (ai.id === t.id) continue;
@@ -245,19 +308,19 @@ const handlers: Handlers = {
     return null;
   },
 
-  offerPeace(ctx, f, a) {
+  offerPeace(ctx, f, a, chapter) {
     const s = ctx.s;
     const t = aiTarget(s, a.target);
     // Human-to-human peace needs a proposal/accept flow (Phase 5).
     if (!t) return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (!rel.war) return 'NOT_AT_WAR';
-    const cost = scaleCost(COSTS.peace, seasonOf(s.turn).diplo);
+    const cost = scaleCost(chapter.costs.peace ?? {}, seasonOf(s.turn).diplo);
     if (!canPay(f.res, cost)) return 'INSUFFICIENT_RESOURCES';
     pay(f.res, cost);
-    if (chance(s, RULES.peaceChance)) {
+    if (chance(s, chapter.rules.peaceChance)) {
       rel.war = false;
-      rel.rel = RULES.peaceRelation;
+      rel.rel = chapter.rules.peaceRelation;
       emit(ctx, [f.id], 'diplomacy', 'good', `🕊️ ${t.name}ยอมสงบศึก`);
       chronicle(s, f.id, `สงบศึกกับ${t.name}`);
     } else {
@@ -272,14 +335,16 @@ const handlers: Handlers = {
     if (!t || !t.alive || t.id === f.id || t.kind !== 'human') return 'INVALID_TARGET';
     const rel = relation(s, t.id, f.id);
     if (!rel.war) return 'NOT_AT_WAR';
-    s.proposals = (s.proposals ?? []).filter((p) => !(p.from === f.id && p.to === t.id && p.kind === 'peace'));
+    s.proposals = (s.proposals ?? []).filter(
+      (p) => !(p.from === f.id && p.to === t.id && p.kind === 'peace'),
+    );
     s.proposals.push({ id: newId(s, 'pr'), kind: 'peace', from: f.id, to: t.id, turn: s.turn });
     emit(ctx, [t.id], 'diplomacy', 'info', `🕊️ ${f.name}เสนอสงบศึก รอคำตอบ`);
     chronicle(s, f.id, `เสนอสงบศึกกับ${t.name}`);
     return null;
   },
 
-  answerProposal(ctx, f, a) {
+  answerProposal(ctx, f, a, chapter) {
     const s = ctx.s;
     const proposals = s.proposals ?? [];
     const p = proposals.find((x) => x.id === a.proposalId && x.to === f.id);
@@ -287,11 +352,31 @@ const handlers: Handlers = {
     s.proposals = proposals.filter((x) => x !== p);
     const other = s.factions[p.from];
     if (!other) return null;
+    const what = p.kind === 'union' ? 'รวมแผ่นดิน' : 'สงบศึก';
+    if (a.accept && other.alive && p.kind === 'union') {
+      const rel = relation(s, f.id, p.from);
+      const cost = scaleCost(chapter.costs.annex ?? {}, seasonOf(s.turn).diplo);
+      if (rel.war || !canPay(other.res, cost)) {
+        // conditions changed since it was proposed — void it rather than half-apply
+        const why = rel.war ? 'ทั้งสองฝ่ายอยู่ในภาวะสงคราม' : `${other.name}มีทรัพย์ไม่พอจ่าย`;
+        emit(ctx, [f.id, p.from], 'diplomacy', 'warn', `ข้อเสนอรวมแผ่นดินเป็นโมฆะ: ${why}`);
+        return null;
+      }
+      pay(other.res, cost);
+      f.ending = 'union';
+      absorbFaction(ctx, other, f);
+      chronicle(s, f.id, `ยอมรับข้อเสนอรวมแผ่นดินกับ${other.name}`);
+      // the acceptor just left the game: if every remaining human had already ended the season,
+      // nobody is left to trigger it — resolve it here instead of deadlocking
+      const waiting = humanFactions(s).filter((h) => !s.ready.includes(h.id));
+      if (humanFactions(s).length && !waiting.length) resolveSeason(ctx);
+      return null;
+    }
     if (a.accept && other.alive) {
       if (p.kind === 'peace') {
         const rel = relation(s, f.id, p.from);
         rel.war = false;
-        rel.rel = RULES.peaceRelation;
+        rel.rel = chapter.rules.peaceRelation;
         // a mutual proposal the other way (they also offered peace) is now moot — drop it too.
         s.proposals = s.proposals.filter(
           (x) => !((x.from === f.id && x.to === p.from) || (x.from === p.from && x.to === f.id)),
@@ -300,8 +385,8 @@ const handlers: Handlers = {
         chronicle(s, f.id, `สงบศึกกับ${other.name}`);
       }
     } else {
-      emit(ctx, [p.from], 'diplomacy', 'bad', `${f.name}ปฏิเสธข้อเสนอสงบศึกของ${other.name}`);
-      chronicle(s, f.id, `ปฏิเสธข้อเสนอสงบศึกจาก${other.name}`);
+      emit(ctx, [p.from], 'diplomacy', 'bad', `${f.name}ปฏิเสธข้อเสนอ${what}ของ${other.name}`);
+      chronicle(s, f.id, `ปฏิเสธข้อเสนอ${what}จาก${other.name}`);
     }
     return null;
   },
@@ -330,8 +415,11 @@ function improveRelation(
   base: Parameters<typeof scaleCost>[0],
   gain: number,
   label: string,
+  /** what a human target is told, e.g. "ส่งบรรณาการให้คุณ" */
+  receivedLabel: string,
+  giftToHuman: boolean,
 ): ActionError | null {
-  const t = aiTarget(ctx.s, target);
+  const t = otherTarget(ctx.s, f, target);
   if (!t) return 'INVALID_TARGET';
   const rel = relation(ctx.s, t.id, f.id);
   if (rel.war) return 'AT_WAR';
@@ -340,6 +428,11 @@ function improveRelation(
   pay(f.res, cost);
   rel.rel = clamp(rel.rel + gain, -100, 100);
   emit(ctx, [f.id], 'diplomacy', 'good', `${label}${t.name} ความสัมพันธ์ +${gain}`);
+  if (t.kind === 'human') {
+    if (giftToHuman) for (const k of Object.keys(cost) as (keyof typeof cost)[]) t.res[k] += cost[k] ?? 0;
+    const gift = giftToHuman ? ` ได้รับ ${fmtCost(cost)}` : '';
+    emit(ctx, [t.id], 'diplomacy', 'good', `${f.name}${receivedLabel}${gift} ความสัมพันธ์ +${gain}`);
+  }
   return null;
 }
 
@@ -367,7 +460,8 @@ export function applyAction(state: GameState, factionId: FactionId, action: Acti
 
   const s = structuredClone(state);
   const ctx: Ctx = { s, ev: [] };
-  const err = handler(ctx, s.factions[factionId]!, action);
+  const chapter = getChapterById(s.chapterId);
+  const err = handler(ctx, s.factions[factionId]!, action, chapter);
   if (err) return fail(err);
   s.log.push(...ctx.ev);
   if (s.log.length > LOG_LIMIT) s.log.splice(0, s.log.length - LOG_LIMIT);

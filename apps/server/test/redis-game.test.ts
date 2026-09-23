@@ -72,9 +72,7 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     const game = await startGame(writer, 'user-1', { seed: 77 });
 
     const frames: { type: string; version?: number }[] = [];
-    const socket = new WebSocketClient(
-      `ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=user-1`,
-    );
+    const socket = new WebSocketClient(`ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=user-1`);
     sockets.push(socket);
     socket.on('message', (raw) => frames.push(JSON.parse(String(raw)) as { type: string; version?: number }));
     await new Promise<void>((resolve, reject) => {
@@ -150,9 +148,7 @@ describe.skipIf(!enabled)('เล่นผ่าน server ที่ใช้ Re
     if (!address || typeof address === 'string') throw new Error('ไม่ได้พอร์ตของ server');
 
     const frames: { type: string; version?: number }[] = [];
-    const socket = new WebSocketClient(
-      `ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=host-1`,
-    );
+    const socket = new WebSocketClient(`ws://127.0.0.1:${address.port}/games/${game.gameId}/ws?token=host-1`);
     sockets.push(socket);
     socket.on('message', (raw) => frames.push(JSON.parse(String(raw)) as { type: string; version?: number }));
     await new Promise<void>((resolve, reject) => {

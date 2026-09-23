@@ -1,4 +1,4 @@
-import { COSTS, DEMANDS, POWERS } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
 import { canPay, scaleCost } from './economy.js';
 import { choicesFor, negotiateCost } from './powers.js';
 import { seasonOf, visibleTo } from './state.js';
@@ -37,22 +37,24 @@ export interface DecisionInfo {
 }
 
 export function describeDecision(s: GameState, d: PendingDecision): DecisionInfo {
-  const P = POWERS[d.power];
+  const chapter = getChapterById(s.chapterId);
+  const P = chapter.foreignPowers[d.power]!;
   const f = s.factions[d.faction]!;
   const arrow = P.side < 0 ? '←' : '→';
   if (d.kind === 'ultimatum') {
+    const ultimatumCost = chapter.costs.ultimatum ?? {};
     return {
       id: d.id,
       powerName: P.name,
-      powerIcon: '⚓',
-      title: 'เรือปืนปิดปากแม่น้ำ',
-      text: `ความอดทนของ${P.name}หมดลง เรือรบทอดสมออยู่หน้าเมืองและรอคำตอบก่อนพลบค่ำ`,
+      powerIcon: chapter.flavor.ultimatum.icon,
+      title: chapter.flavor.ultimatum.title,
+      text: chapter.flavor.ultimatum.text.replace('{P}', P.name),
       options: [
         {
           choice: 'pay',
           label: 'จ่ายค่าชดเชย',
-          detail: `💰${COSTS.ultimatum.wealth} ความอดทนกลับมาเป็น 2`,
-          enabled: canPay(f.res, COSTS.ultimatum),
+          detail: `💰${ultimatumCost.wealth ?? 0} ความอดทนกลับมาเป็น 2`,
+          enabled: canPay(f.res, ultimatumCost),
         },
         {
           choice: 'yield',
@@ -63,7 +65,7 @@ export function describeDecision(s: GameState, d: PendingDecision): DecisionInfo
       ],
     };
   }
-  const D = DEMANDS[d.demand]!;
+  const D = chapter.demands[d.demand]!;
   const eff = (half: boolean) => {
     const h = (v: number) => (half ? Math.round(v / 2) : v);
     const parts: string[] = [];

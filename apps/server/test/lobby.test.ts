@@ -15,11 +15,7 @@ interface LobbyBody {
   startedGameId: string | null;
 }
 
-async function createLobby(
-  instance: FastifyInstance,
-  userId: string,
-  payload: Record<string, unknown> = {},
-) {
+async function createLobby(instance: FastifyInstance, userId: string, payload: Record<string, unknown> = {}) {
   return instance.inject({
     method: 'POST',
     url: '/lobbies',

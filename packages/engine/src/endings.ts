@@ -1,4 +1,4 @@
-import { ENDINGS, RULES } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
 import { chronicle, citiesOf, emit, humanFactions } from './state.js';
 import type { Ctx } from './state.js';
 import type { EndingId, Faction, GameState } from './types.js';
@@ -24,12 +24,13 @@ export function endingProgress(s: GameState, f: Faction): EndingProgress {
 /** First match wins (see ENDING_ORDER). */
 export function evaluateEnding(s: GameState, f: Faction): EndingId {
   if (!f.alive) return 'ashes';
+  const chapter = getChapterById(s.chapterId);
   const p = endingProgress(s, f);
-  if (p.shadow.sovereignty < 40 || p.shadow.extremeTurns >= RULES.extremeLimit) return 'shadow';
+  if (p.shadow.sovereignty < 40 || p.shadow.extremeTurns >= chapter.rules.extremeLimit) return 'shadow';
   if (p.empire.captures >= 3 && p.empire.cityShare >= 0.7) return 'empire';
   if (
     p.river.sovereignty >= 80 &&
-    Math.abs(p.river.meter) <= RULES.balancedZone &&
+    Math.abs(p.river.meter) <= chapter.rules.balancedZone &&
     p.river.cities >= 3 &&
     p.river.wealth >= 100
   )
@@ -41,6 +42,7 @@ export function evaluateEnding(s: GameState, f: Faction): EndingId {
 export function finishGame(ctx: Ctx): void {
   const s = ctx.s;
   if (s.ended) return;
+  const chapter = getChapterById(s.chapterId);
   s.ended = true;
   s.pending = [];
   s.proposals = [];
@@ -48,7 +50,7 @@ export function finishGame(ctx: Ctx): void {
   for (const f of Object.values(s.factions)) {
     if (f.kind !== 'human') continue;
     f.ending = f.ending ?? evaluateEnding(s, f);
-    chronicle(s, f.id, `ตอนจบ: ${ENDINGS[f.ending].name}`);
+    chronicle(s, f.id, `ตอนจบ: ${chapter.endings[f.ending]!.name}`);
   }
   emit(ctx, null, 'ending', 'info', 'จบรัชกาล');
 }

@@ -1,4 +1,5 @@
 import type { GameState } from '../types.js';
+import { CHAPTERS } from './chapters/index.js';
 import type { CoreResourceId, ResourceAmounts } from './schema.js';
 
 /**
@@ -37,6 +38,33 @@ export const LEGACY_CAPS: Record<LegacyCategory, number> = {
   diplomacy: 0.1,
 };
 
+/** Thai label per category, shared by the notes below and the web UI. */
+export const LEGACY_LABELS: Record<LegacyCategory, string> = {
+  infrastructure: 'โครงสร้างพื้นฐาน (ผลผลิตข้าว)',
+  prosperity: 'ความมั่งคั่ง (ผลผลิตทรัพย์)',
+  culture: 'วัฒนธรรม (ผลผลิตศรัทธา + เสถียรภาพเริ่มต้น)',
+  knowledge: 'ภูมิปัญญา (ผลผลิตความรู้)',
+  military: 'การทหาร (กำลังทัพเริ่มต้น)',
+  diplomacy: 'การทูต (ความสัมพันธ์เริ่มต้นกับแคว้นอื่น)',
+};
+
+/**
+ * Sanitises Legacy totals coming from outside the engine (the server reads them from
+ * Postgres): every category present, finite, and within `[0, LEGACY_CAPS[c]]`. The
+ * caps are the whole point of the system, so the engine enforces them itself rather
+ * than trusting stored data.
+ */
+export function clampLegacyTotals(
+  input: Partial<Record<LegacyCategory, number>>,
+): Record<LegacyCategory, number> {
+  const out = Object.fromEntries(LEGACY_CATEGORIES.map((c) => [c, 0])) as Record<LegacyCategory, number>;
+  for (const c of LEGACY_CATEGORIES) {
+    const v = input[c];
+    out[c] = typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, 0), LEGACY_CAPS[c]) : 0;
+  }
+  return out;
+}
+
 /** Which core resource (or faction stat) each category's bonus is expressed against. */
 const CATEGORY_TARGET: Record<LegacyCategory, CoreResourceId | 'stability' | 'armyStr' | 'relation'> = {
   infrastructure: 'rice',
@@ -72,6 +100,7 @@ export function computeLegacyBonuses(state: GameState, chapterId: string, factio
   if (!f) return [];
 
   const citiesHeld = state.cities.filter((c) => c.owner === factionId).length;
+  const chapterName = CHAPTERS[chapterId]?.manifest.name ?? chapterId;
   const raw: Record<LegacyCategory, number> = {
     infrastructure: citiesHeld * 0.08,
     prosperity: f.res.wealth / 200,
@@ -82,12 +111,12 @@ export function computeLegacyBonuses(state: GameState, chapterId: string, factio
   };
 
   const notes: Record<LegacyCategory, string> = {
-    infrastructure: `สืบทอดจาก${chapterId}: โครงสร้างพื้นฐาน ${citiesHeld} เมืองที่เหลืออยู่`,
-    prosperity: `สืบทอดจาก${chapterId}: คลังทรัพย์ที่สั่งสมไว้`,
-    culture: `สืบทอดจาก${chapterId}: ศรัทธาที่ประชาชนสั่งสม`,
-    knowledge: `สืบทอดจาก${chapterId}: ตำราและภูมิปัญญาที่ถ่ายทอดมา`,
-    military: `สืบทอดจาก${chapterId}: ประสบการณ์รบจากสงคราม ${f.stats.wins} ครั้งที่ชนะ`,
-    diplomacy: `สืบทอดจาก${chapterId}: สายสัมพันธ์ทางการทูตที่วางไว้`,
+    infrastructure: `สืบทอดจากบท${chapterName}: โครงสร้างพื้นฐาน ${citiesHeld} เมืองที่เหลืออยู่`,
+    prosperity: `สืบทอดจากบท${chapterName}: คลังทรัพย์ที่สั่งสมไว้`,
+    culture: `สืบทอดจากบท${chapterName}: ศรัทธาที่ประชาชนสั่งสม`,
+    knowledge: `สืบทอดจากบท${chapterName}: ตำราและภูมิปัญญาที่ถ่ายทอดมา`,
+    military: `สืบทอดจากบท${chapterName}: ประสบการณ์รบจากสงคราม ${f.stats.wins} ครั้งที่ชนะ`,
+    diplomacy: `สืบทอดจากบท${chapterName}: สายสัมพันธ์ทางการทูตที่วางไว้`,
   };
 
   const bonuses: LegacyBonus[] = [];

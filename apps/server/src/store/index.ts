@@ -3,7 +3,16 @@ import { createMemoryStore } from './memory.js';
 import { createRedisStore } from './redis.js';
 import type { Store, StoreOptions } from './types.js';
 
-export type { GameRecord, GameUpdate, LobbyRecord, LobbySeat, RateLimitResult, SeatRecord, Store, StoreOptions } from './types.js';
+export type {
+  GameRecord,
+  GameUpdate,
+  LobbyRecord,
+  LobbySeat,
+  RateLimitResult,
+  SeatRecord,
+  Store,
+  StoreOptions,
+} from './types.js';
 export { createMemoryStore } from './memory.js';
 export { createRedisStore } from './redis.js';
 

@@ -1,6 +1,9 @@
 import { SEASONS } from './data.js';
 import type { SeasonDef } from './data.js';
 import { earlyRattanakosinChapter } from './content/chapters/early-rattanakosin.js';
+import { LEGACY_CATEGORIES, applyLegacyBonuses, clampLegacyTotals } from './content/legacy.js';
+import type { LegacyCategory } from './content/legacy.js';
+import { CORE_RESOURCE_IDS } from './content/schema.js';
 import type { ChapterDefinition } from './content/schema.js';
 import type {
   Army,
@@ -25,6 +28,12 @@ export interface Ctx {
 export interface HumanSeatOptions {
   id: FactionId;
   name?: string;
+  /**
+   * Merged Legacy totals this player carries in from their previous chapter
+   * (`mergeLegacyBonuses` output). Clamped to `LEGACY_CAPS` here regardless of what the
+   * caller passes. Omit for no Legacy. See docs/adr/0007 Addendum 9.
+   */
+  legacy?: Partial<Record<LegacyCategory, number>>;
 }
 export interface CreateGameOptions {
   seed?: number;
@@ -36,14 +45,24 @@ export interface CreateGameOptions {
    * chapter that ships today (`content/chapters/early-rattanakosin.ts`, itself derived
    * from `data.ts`).
    *
-   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7): only state *setup* (seats, starting resources/
-   * stability/garrison, maxTurn, foreign-power roster) is chapter-driven so far.
-   * `economy.ts`/`turn.ts`/`ai.ts`/`combat.ts`/`powers.ts`/`endings.ts`/`actions.ts`
-   * still import buildings/terrain/perks/demands/endings from `data.ts` directly — so
-   * a chapter whose building/terrain/power ids differ from `data.ts`'s will build a
-   * `GameState` here but then misbehave once play starts (unknown building ids
-   * silently yield nothing, etc.). Passing a different chapter is not supported end
-   * to end yet; this is the first of several planned increments.
+   * NOTE (เฟส 6, ดู ADR-0007 ข้อ 7 + Addendum 4-7): state *setup* (seats, starting
+   * resources/stability/garrison, maxTurn, foreign-power roster) is chapter-driven, and so
+   * is all gameplay logic that reads content — `economy.ts` (city yields, upkeep, perks),
+   * `combat.ts` (terrain/city/building defense, captured garrisons, perks), `movement.ts`
+   * and `ai.ts` (terrain move cost, AI balance rules), `turn.ts`, `powers.ts`,
+   * `endings.ts`, `actions.ts`, `views.ts` — plus the web UI (`apps/web/src/ui/format.ts#
+   * chapterOf`). They all resolve chapter data by `GameState.chapterId` via
+   * `content/chapters/index.ts#getChapterById`. Exceptions, on purpose:
+   * (1) Every function above resolves chapter content from the **registry**, keyed by
+   *     `chapter.manifest.id` — NOT from the specific `ChapterDefinition` object passed
+   *     here. Pass a `chapter` object whose id is registered with different data and you
+   *     get setup from the object but gameplay from the registered chapter. Only matters
+   *     once a second chapter is registered.
+   * (2) `hex.ts` (and the web map renderer) still read `MAP`/`RIVER`/terrain glyphs from
+   *     `data.ts` as module-level singletons — ADR-0007 Addendum 6.
+   * (3) `seasonOf` below still reads `SEASONS` from `data.ts`: the season list is coupled
+   *     to `turn.ts`'s bespoke seasonal-event code (and `ai.ts`'s `'rain'` check), which
+   *     waits for a `SeasonalEventDef` schema — ADR-0007 Addendum 5/7.
    */
   chapter?: ChapterDefinition;
 }
@@ -67,9 +86,12 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
   const humans = opts.humans?.length ? opts.humans : [{ id: 'p1' }];
   if (humans.length > seats.length) throw new Error(`at most ${seats.length} human players`);
   const ids = new Set<string>();
+  /** human faction id → additive starting relation toward every AI faction, from Legacy */
+  const legacyRelation = new Map<FactionId, number>();
   const seed = (opts.seed ?? Math.floor(Math.random() * 2 ** 32)) >>> 0;
   const s: GameState = {
     schemaVersion: 1,
+    chapterId: chapter.manifest.id,
     seed,
     rng: seed,
     turn: 1,
@@ -115,6 +137,18 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       recruitCd: 0,
       ending: null,
     };
+    let legacyArmyMultiplier = 1;
+    if (human?.legacy) {
+      const totals = clampLegacyTotals(human.legacy);
+      if (LEGACY_CATEGORIES.some((c) => totals[c] > 0)) {
+        const adj = applyLegacyBonuses(totals);
+        f.stability = clamp(f.stability + adj.stabilityBonus, 0, 100);
+        for (const k of CORE_RESOURCE_IDS) f.res[k] += adj.startResourceBonus[k] ?? 0;
+        f.legacy = { totals, yieldMultiplier: adj.cityYieldMultiplier };
+        legacyArmyMultiplier = adj.armyStrMultiplier;
+        legacyRelation.set(id, adj.relationBonus);
+      }
+    }
     s.factions[id] = f;
     s.order.push(id);
     const g = human ? rules.humanCapitalGarrison : seat.city.aiGarrison;
@@ -135,7 +169,7 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       owner: id,
       c: seat.army.c,
       r: seat.army.r,
-      str: human ? seat.army.humanStr : seat.army.aiStr,
+      str: human ? Math.round(seat.army.humanStr * legacyArmyMultiplier) : seat.army.aiStr,
       morale: human ? 90 : 85,
       mp: human ? seasonOf(1).move : 0,
       moved: false,
@@ -153,6 +187,14 @@ export function createGame(opts: CreateGameOptions = {}): GameState {
       }
       s.relations[pairKey(a.id, b.id)] = { rel, war: false };
     }
+  for (const [humanId, bonus] of legacyRelation) {
+    if (bonus <= 0) continue;
+    for (const other of Object.values(s.factions)) {
+      if (other.kind !== 'ai') continue;
+      const r = s.relations[pairKey(humanId, other.id)];
+      if (r) r.rel = clamp(r.rel + bonus, -100, 100);
+    }
+  }
   for (const f of humanFactions(s)) {
     const cap = capitalOf(s, f.id);
     chronicle(s, f.id, `ก่อตั้ง${cap?.name ?? 'เมืองหลวง'}`);

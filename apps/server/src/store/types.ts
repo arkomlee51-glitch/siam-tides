@@ -57,6 +57,8 @@ export interface LobbyRecord {
   createdAt: string;
   /** ส่งต่อให้เกมตอน start — undefined = ไม่จำกัดเวลาต่อฤดู */
   seasonTimerSeconds: number | undefined;
+  /** บทที่จะเล่น — undefined = บท default (ห้องที่สร้างก่อนมีตัวเลือกบท) */
+  chapterId?: string;
 }
 
 export interface Store {

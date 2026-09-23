@@ -1,8 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { ENGINE_VERSION, applyAction, createGame, viewFor, visibleTo } from '@siam/engine';
+import {
+  ENGINE_VERSION,
+  LEGACY_CATEGORIES,
+  applyAction,
+  computeLegacyBonuses,
+  createGame,
+  getChapterById,
+  mergeLegacyBonuses,
+  viewFor,
+  visibleTo,
+} from '@siam/engine';
 import type { Action, GameEvent, GameState } from '@siam/engine';
 import type { Verifier } from '../auth.js';
-import type { Db, DbSeat } from '../db/index.js';
+import type { Db, DbSeat, LegacyRecord } from '../db/index.js';
 import { AppError, forbidden, notFound, unauthorized, versionConflict } from '../errors.js';
 import type { GameRecord, SeatRecord, Store } from '../store/index.js';
 import type { CreateGameInput } from '../schemas.js';
@@ -50,7 +60,13 @@ export class GameService {
 
   async create(input: CreateGameInput, ownerUserId: string, ownerName: string | null): Promise<CreatedGame> {
     const displayName = input.name?.trim() || ownerName || 'ผู้เล่น';
-    return this.createWithHumans([{ userId: ownerUserId, name: displayName }], input.seed, input.maxTurn, undefined);
+    return this.createWithHumans(
+      [{ userId: ownerUserId, name: displayName }],
+      input.seed,
+      input.maxTurn,
+      undefined,
+      input.chapterId,
+    );
   }
 
   /** เฟส 5: สร้างเกมจากห้องรอที่ครบที่นั่งแล้ว — เจ้าของห้อง (index 0) ได้ที่นั่ง p1 เสมอ ที่เหลือ p2..p4 ตามลำดับที่เข้าร่วม */
@@ -59,8 +75,9 @@ export class GameService {
     seed: number | undefined,
     maxTurn: number | undefined,
     seasonTimerSeconds: number | undefined,
+    chapterId?: string,
   ): Promise<CreatedGame> {
-    return this.createWithHumans(seats, seed, maxTurn, seasonTimerSeconds);
+    return this.createWithHumans(seats, seed, maxTurn, seasonTimerSeconds, chapterId);
   }
 
   private async createWithHumans(
@@ -68,11 +85,29 @@ export class GameService {
     seed: number | undefined,
     maxTurn: number | undefined,
     seasonTimerSeconds: number | undefined,
+    /** undefined = บท default; ต้องเป็นบทที่ลงทะเบียนแล้ว (schema ตรวจไว้ก่อนถึงตรงนี้) */
+    chapterId: string | undefined,
   ): Promise<CreatedGame> {
+    // Legacy: ผู้เล่นแต่ละคนได้โบนัสจากบทล่าสุดที่ตัวเองเล่นจบ (ADR-0007 Addendum 9)
+    let legacyByUser: Map<string, LegacyRecord>;
+    try {
+      legacyByUser = await this.db.loadLatestLegacy(humans.map((h) => h.userId));
+    } catch (err) {
+      throw new AppError(503, 'STORE_UNAVAILABLE', 'โหลดข้อมูล Legacy ไม่สำเร็จ ลองใหม่อีกครั้ง', {
+        cause: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const legacyFor = (userId: string) => {
+      const record = legacyByUser.get(userId);
+      if (!record) return undefined;
+      const totals = mergeLegacyBonuses(record.bonuses);
+      return LEGACY_CATEGORIES.some((c) => totals[c] > 0) ? totals : undefined;
+    };
     const state = createGame({
       seed,
       maxTurn,
-      humans: humans.map((h, i) => ({ id: `p${i + 1}`, name: h.name })),
+      humans: humans.map((h, i) => ({ id: `p${i + 1}`, name: h.name, legacy: legacyFor(h.userId) })),
+      chapter: chapterId ? getChapterById(chapterId) : undefined,
     });
     const userIdByFaction = new Map<string, string>(humans.map((h, i) => [`p${i + 1}`, h.userId]));
     const owner = state.factions['p1'];
@@ -84,7 +119,12 @@ export class GameService {
       name: f.name,
       userId: f.kind === 'human' ? (userIdByFaction.get(f.id) ?? null) : null,
     }));
-    const dbSeats: DbSeat[] = seats.map((s) => ({ ...s, ending: null }));
+    // เก็บ Legacy ที่ใช้จริง (หลัง clamp) ต่อที่นั่ง — replay ต้องใช้ค่านี้ ไม่อ่าน player_legacy ใหม่
+    const dbSeats: DbSeat[] = seats.map((s) => ({
+      ...s,
+      ending: null,
+      legacy: state.factions[s.factionId]?.legacy?.totals ?? null,
+    }));
     const gameId = randomUUID();
 
     // เขียน Supabase (ถาวร) ก่อน Redis (ร้อน) — ถ้าเขียนไม่สำเร็จจะได้ไม่มีเกมค้างที่ Redis อย่างเดียวจน replay คืนไม่ได้
@@ -94,6 +134,8 @@ export class GameService {
         engineVersion: ENGINE_VERSION,
         seed: seed ?? state.seed,
         maxTurn,
+        chapterId: state.chapterId,
+        seasonTimerSeconds,
         createdBy: humans[0]!.userId,
         seats: dbSeats,
       });
@@ -241,11 +283,7 @@ export class GameService {
           .putSnapshot({ gameId, turn: next.state.turn, version: next.version, state: next.state })
           .catch(() => undefined);
       }
-      if (next.state.ended && !record.state.ended) {
-        const endings: Record<string, string> = {};
-        for (const f of Object.values(next.state.factions)) if (f.ending) endings[f.id] = f.ending;
-        void this.db.markFinished(gameId, endings).catch(() => undefined);
-      }
+      if (next.state.ended && !record.state.ended) this.recordFinish(next);
 
       const outcome = {
         ...this.snapshot(next, factionId),
@@ -288,8 +326,15 @@ export class GameService {
     } else {
       const humans = data.seats
         .filter((s): s is DbSeat & { userId: string } => s.userId !== null)
-        .map((s) => ({ id: s.factionId, name: s.name }));
-      state = createGame({ seed: data.game.seed ?? undefined, maxTurn: data.game.maxTurn ?? undefined, humans });
+        .map((s) => ({ id: s.factionId, name: s.name, legacy: s.legacy ?? undefined }));
+      // null chapterId = เกมก่อนเฟส 6 → บท default ของ createGame; id ที่ไม่ได้ลงทะเบียนจะ throw ชัด ๆ
+      // (ดีกว่า replay ด้วยบทผิดเงียบ ๆ)
+      state = createGame({
+        seed: data.game.seed ?? undefined,
+        maxTurn: data.game.maxTurn ?? undefined,
+        humans,
+        chapter: data.game.chapterId ? getChapterById(data.game.chapterId) : undefined,
+      });
       version = 0;
     }
 
@@ -310,13 +355,37 @@ export class GameService {
       state,
       createdAt: data.game.createdAt,
       updatedAt: new Date().toISOString(),
-      // หมายเหตุ: seasonTimerSeconds ยังไม่ถูกเก็บถาวรใน Supabase (มีแค่ใน Redis/memory record)
-      // cold-start replay จึงคืนมาแบบไม่มีตัวจับเวลาเสมอ — งดเวลาต่อฤดูมากกว่าค้างเวลาผิด ๆ
-      seasonTimerSeconds: null,
-      seasonDeadline: null,
+      // เก็บแค่วินาทีต่อฤดูใน Supabase ไม่เก็บ deadline — replay เริ่มนับฤดูปัจจุบันใหม่เต็มช่วง
+      // (ผู้เล่นได้เวลาเพิ่มได้อย่างเดียว ไม่มีทางเสียเวลา) ดู ADR-0007 Addendum 8
+      seasonTimerSeconds: data.game.seasonTimerSeconds,
+      seasonDeadline:
+        data.game.seasonTimerSeconds && !state.ended
+          ? new Date(Date.now() + data.game.seasonTimerSeconds * 1000).toISOString()
+          : null,
     };
     await this.store.putGame(record);
     return record;
+  }
+
+  /**
+   * เกมเพิ่งจบ: ปิดเกมใน DB และบันทึก Legacy ของผู้เล่นมนุษย์ทุกคนไว้ใช้ในบทถัดไป — best-effort ทั้งคู่
+   * (ไม่ block response) บันทึกแม้ Legacy ว่าง เพราะกติกาคือ "ใช้บทล่าสุดที่เล่นจบ" — ถ้าข้ามแถวว่างไป
+   * ผู้เล่นจะได้ Legacy ของบทเก่ากว่ามาแทนผิดกติกา
+   */
+  private recordFinish(record: GameRecord): void {
+    const { state } = record;
+    const endings: Record<string, string> = {};
+    for (const f of Object.values(state.factions)) if (f.ending) endings[f.id] = f.ending;
+    void this.db.markFinished(record.id, endings).catch(() => undefined);
+    const legacy = record.seats
+      .filter((s): s is typeof s & { userId: string } => s.userId !== null)
+      .map((s) => ({
+        userId: s.userId,
+        chapterId: state.chapterId,
+        bonuses: computeLegacyBonuses(state, state.chapterId, s.factionId),
+        sourceGameId: record.id,
+      }));
+    void this.db.upsertLegacy(legacy).catch(() => undefined);
   }
 
   /** true = ตั้งเวลาไว้ และเวลาต่อฤดูปัจจุบันหมดแล้ว แต่ยังมีมนุษย์ไม่ ready */
@@ -389,11 +458,7 @@ export class GameService {
       void this.db
         .putSnapshot({ gameId: record.id, turn: next.state.turn, version: next.version, state: next.state })
         .catch(() => undefined);
-      if (next.state.ended && !record.state.ended) {
-        const endings: Record<string, string> = {};
-        for (const f of Object.values(next.state.factions)) if (f.ending) endings[f.id] = f.ending;
-        void this.db.markFinished(record.id, endings).catch(() => undefined);
-      }
+      if (next.state.ended && !record.state.ended) this.recordFinish(next);
       await this.store.publish(record.id, {
         version: next.version,
         seq: next.seq,

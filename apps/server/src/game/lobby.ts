@@ -1,3 +1,4 @@
+import { DEFAULT_CHAPTER_ID } from '@siam/engine';
 import { lobbyForbidden, lobbyFull, lobbyNotFound, lobbyStarted } from '../errors.js';
 import type { LobbyRecord, Store } from '../store/index.js';
 import type { CreatedGame, GameService } from './service.js';
@@ -30,6 +31,7 @@ export interface LobbyView {
   startedGameId: string | null;
   /** undefined = ไม่จำกัดเวลาต่อฤดูเมื่อเกมเริ่ม */
   seasonTimerSeconds: number | undefined;
+  chapterId: string;
 }
 
 const toView = (record: LobbyRecord): LobbyView => ({
@@ -40,6 +42,7 @@ const toView = (record: LobbyRecord): LobbyView => ({
   seats: record.seats,
   startedGameId: record.startedGameId,
   seasonTimerSeconds: record.seasonTimerSeconds,
+  chapterId: record.chapterId ?? DEFAULT_CHAPTER_ID,
 });
 
 /**
@@ -59,6 +62,7 @@ export class LobbyService {
     seed: number | undefined,
     maxTurn: number | undefined,
     seasonTimerSeconds: number | undefined,
+    chapterId?: string,
   ): Promise<LobbyView> {
     let code = randomCode();
     // กันโค้ดชนกัน (โอกาสน้อยมากกับ 32^6 ตัวเลือก แต่กันไว้ไม่เสียหาย)
@@ -74,6 +78,7 @@ export class LobbyService {
       startedGameId: null,
       createdAt: new Date().toISOString(),
       seasonTimerSeconds,
+      chapterId,
     };
     await this.store.putLobby(record);
     return toView(record);
@@ -130,6 +135,7 @@ export class LobbyService {
         record.seed,
         record.maxTurn,
         record.seasonTimerSeconds,
+        record.chapterId,
       );
       record.startedGameId = created.gameId;
       await this.store.putLobby(record);

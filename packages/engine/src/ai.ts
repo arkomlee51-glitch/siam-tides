@@ -1,4 +1,4 @@
-import { RULES, TERRAIN } from './data.js';
+import { getChapterById } from './content/chapters/index.js';
 import { resolveBattle } from './combat.js';
 import { hexDistance, neighbors, terrainAt } from './hex.js';
 import { pathTo } from './movement.js';
@@ -39,12 +39,13 @@ function stepAlong(
   stopNearEnemy: boolean,
 ): void {
   const full = mp;
+  const terrain = getChapterById(s.chapterId).terrain;
   for (let i = 0; i < path.length - 1; i++) {
     const [nc, nr] = path[i]!;
     if (armyAt(s, nc, nr)) break;
     const city = cityAt(s, nc, nr);
     if (city && city.owner !== a.owner) break;
-    const cost = TERRAIN[terrainAt(nc, nr)!].cost;
+    const cost = terrain[terrainAt(nc, nr)!]!.cost;
     if (cost > mp && !(mp === full && i === 0)) break;
     mp -= cost;
     a.c = nc;
@@ -56,6 +57,7 @@ function stepAlong(
 
 function actFaction(ctx: Ctx, ai: Faction): void {
   const s = ctx.s;
+  const chapter = getChapterById(s.chapterId);
   const S = seasonOf(s.turn);
   const cap = capitalOf(s, ai.id);
   if (!cap) {
@@ -72,12 +74,12 @@ function actFaction(ctx: Ctx, ai: Faction): void {
         owner: ai.id,
         c: cap.c,
         r: cap.r,
-        str: RULES.aiRecruitStr,
+        str: chapter.rules.aiRecruitStr,
         morale: 80,
         mp: 0,
         moved: false,
       });
-      ai.recruitCd = RULES.aiRecruitCooldown;
+      ai.recruitCd = chapter.rules.aiRecruitCooldown;
     }
     return;
   }
@@ -87,17 +89,17 @@ function actFaction(ctx: Ctx, ai: Faction): void {
     if (p) stepAlong(s, army, p, mp, false);
   };
   if (!enemies.length) {
-    army.str = Math.min(RULES.aiPeaceStrCap, army.str + 2);
+    army.str = Math.min(chapter.rules.aiPeaceStrCap, army.str + 2);
     army.morale = Math.min(95, army.morale + 5);
     goHome(1, 2);
     return;
   }
-  army.str = Math.min(RULES.aiWarStrCap, army.str + 1);
+  army.str = Math.min(chapter.rules.aiWarStrCap, army.str + 1);
   if (S.id === 'rain') {
     army.morale = Math.min(95, army.morale + 5);
     return;
   }
-  if (army.str < RULES.aiWeakStr) {
+  if (army.str < chapter.rules.aiWeakStr) {
     goHome(S.move, 1);
     return;
   }

@@ -11,6 +11,7 @@ import type {
   SeatId,
   TerrainId,
 } from './types.js';
+import type { BuildingEffect, PerkEffect } from './content/schema.js';
 
 /**
  * Offset (odd-r) hex map, pointy-top.
@@ -58,6 +59,8 @@ export interface TerrainDef {
   cost: number;
   def: number;
   yield: Partial<Resources>;
+  /** seasonal-disaster ids this terrain is exposed to, e.g. `['flood']` — see turn.ts */
+  disasterExposure?: readonly string[];
 }
 
 export const TERRAIN: Record<TerrainId, TerrainDef> = {
@@ -68,6 +71,7 @@ export const TERRAIN: Record<TerrainId, TerrainDef> = {
     cost: 1,
     def: 1.0,
     yield: { rice: 2, man: 0.5 },
+    disasterExposure: ['flood'],
   },
   K: { id: 'K', name: 'ที่ราบสูงโคราช', short: 'ที่ราบสูง', cost: 1, def: 1.1, yield: { rice: 1, man: 1 } },
   L: { id: 'L', name: 'ที่สูงล้านนา', short: 'ที่สูง', cost: 2, def: 1.3, yield: { rice: 1, faith: 1 } },
@@ -148,6 +152,8 @@ export interface BuildingDef {
   yield: Partial<Resources>;
   coastalOnly?: boolean;
   garrisonBonus?: number;
+  /** what it does beyond base yield, applied generically by turn.ts — see content/schema.ts */
+  effects?: readonly BuildingEffect[];
 }
 
 export const BUILDINGS: Record<BuildingId, BuildingDef> = {
@@ -157,6 +163,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     desc: 'ข้าว +6 และลดความเสียหายจากน้ำท่วม',
     cost: { wealth: 30 },
     yield: { rice: 6 },
+    effects: [{ kind: 'disasterLossReduction', disaster: 'flood', reducedLoss: 8 }],
   },
   market: {
     id: 'market',
@@ -171,6 +178,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     desc: 'ศรัทธา +3 และเสถียรภาพ +1 ทุกฤดู',
     cost: { wealth: 25, man: 5 },
     yield: { faith: 3 },
+    effects: [{ kind: 'stabilityPerCity', amount: 1 }],
   },
   academy: { id: 'academy', name: 'หอความรู้', desc: 'ความรู้ +3', cost: { wealth: 40 }, yield: { know: 3 } },
   walls: {
@@ -180,6 +188,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
     cost: { wealth: 30, man: 10 },
     yield: {},
     garrisonBonus: 5,
+    effects: [{ kind: 'cityDefenseMultiplier', multiplier: 1.5 }],
   },
   port: {
     id: 'port',
@@ -216,7 +225,6 @@ export const RULES = {
   riverBonus: { rice: 1, wealth: 1 } as Partial<Resources>,
   coastalWealth: 2,
   cityDefense: 1.25,
-  wallsDefense: 1.5,
   capitalDefense: 1.3,
   humanCapitalGarrison: 30,
   newCityGarrison: 8,
@@ -252,11 +260,31 @@ export interface PerkDef {
   at: number;
   name: string;
   desc: string;
+  /** what it does, applied generically by economy.ts/combat.ts — see content/schema.ts */
+  effects: readonly PerkEffect[];
 }
 export const PERKS: readonly PerkDef[] = [
-  { id: 'irrig', at: 25, name: 'ระบบชลประทาน', desc: 'ผลผลิตข้าว +20%' },
-  { id: 'powder', at: 60, name: 'ดินปืน', desc: 'พลังบุกและพลังรับ +20%' },
-  { id: 'print', at: 100, name: 'การพิมพ์', desc: 'ความรู้ +30%' },
+  {
+    id: 'irrig',
+    at: 25,
+    name: 'ระบบชลประทาน',
+    desc: 'ผลผลิตข้าว +20%',
+    effects: [{ kind: 'resourceMultiplier', resource: 'rice', multiplier: 1.2 }],
+  },
+  {
+    id: 'powder',
+    at: 60,
+    name: 'ดินปืน',
+    desc: 'พลังบุกและพลังรับ +20%',
+    effects: [{ kind: 'combatMultiplier', multiplier: 1.2 }],
+  },
+  {
+    id: 'print',
+    at: 100,
+    name: 'การพิมพ์',
+    desc: 'ความรู้ +30%',
+    effects: [{ kind: 'resourceMultiplier', resource: 'know', multiplier: 1.3 }],
+  },
 ];
 
 export interface PowerDef {
@@ -310,6 +338,13 @@ export interface EndingDef {
 /** Evaluated top to bottom — first match wins. */
 export const ENDING_ORDER: readonly EndingId[] = ['ashes', 'shadow', 'empire', 'river', 'wisdom', 'survive'];
 export const ENDINGS: Record<EndingId, EndingDef> = {
+  union: {
+    id: 'union',
+    icon: '🤝',
+    name: 'รวมแผ่นดิน',
+    cond: 'ยอมรับข้อเสนอรวมแผ่นดินจากผู้เล่นอื่น',
+    text: 'แคว้นของคุณเลือกรวมเข้ากับเพื่อนบ้านโดยไม่ต้องเสียเลือดเนื้อ ราษฎรปลอดภัย ชื่อของคุณถูกจารึกในฐานะผู้ยอมถอยเพื่อความสงบของแผ่นดิน',
+  },
   ashes: {
     id: 'ashes',
     icon: '🕯️',

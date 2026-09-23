@@ -27,6 +27,7 @@ export async function registerLobbyRoutes(app: FastifyInstance): Promise<void> {
       request.body.seed,
       request.body.maxTurn,
       request.body.seasonTimerSeconds,
+      request.body.chapterId,
     );
     return reply.status(201).send(lobby);
   });

@@ -296,6 +296,26 @@ aside.side {
   background: transparent;
   border-style: dashed;
 }
+/* chapter picker (ADR-0009) — a whole card is the button */
+.chapters {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.card.chapter-pick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.card.chapter-pick:hover,
+.card.chapter-pick:focus-visible {
+  border-color: var(--accent, currentColor);
+}
+.card.chapter-pick h3 {
+  margin: 0 0 4px;
+}
 .card.dim {
   opacity: 0.6;
 }

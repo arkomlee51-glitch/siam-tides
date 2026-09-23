@@ -1,15 +1,18 @@
-import { RESOURCES, SEASONS, computeIncome, seasonOf, upkeepOf, yearOf } from '@siam/engine';
+// SEASONS intentionally still comes from data.ts: the engine's `seasonOf` does too, until the
+// seasonal-event structure becomes chapter data (docs/adr/0007 Addendum 5/7).
+import { SEASONS, computeIncome, seasonOf, upkeepOf, yearOf } from '@siam/engine';
 import { ME, useStore } from '../store';
-import { RES_ORDER, signed } from './format';
+import { RES_ORDER, chapterOf, signed } from './format';
 import type { ThemeMode } from '../theme';
 
 export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () => void }) {
   const state = useStore((s) => s.state);
-  const newGame = useStore((s) => s.newGame);
   const pushModal = useStore((s) => s.pushModal);
   const online = useStore((s) => s.mode === 'server');
   const connection = useStore((s) => s.connection);
   const inFlight = useStore((s) => s.inFlight);
+  const chapter = chapterOf(state);
+  const labels = chapter.resourceLabels;
   const goOnline = useStore((s) => s.goOnline);
   const goOffline = useStore((s) => s.goOffline);
   const me = state.factions[ME]!;
@@ -29,7 +32,11 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
       <div className="titlebar">
         <div>
           <h1>สยาม: กระแสแห่งราชอาณาจักร</h1>
-          <p>บทไผ่ลู่ลม สิบปี สามฤดูต่อปี</p>
+          <p>
+            บท{chapter.manifest.name}
+            {chapter.manifest.historianReviewed ? '' : ' (ร่าง)'} · {Math.ceil(state.maxTurn / 3)} ปี
+            สามฤดูต่อปี
+          </p>
         </div>
         <div className="tbtns">
           <button className="btn icon" onClick={onCycleTheme}>
@@ -48,7 +55,11 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
           <button className="btn icon" onClick={() => pushModal({ kind: 'intro' })}>
             วิธีเล่น
           </button>
-          <button className="btn icon" onClick={() => pushModal({ kind: 'account' })} title="บัญชีและเกมของฉัน">
+          <button
+            className="btn icon"
+            onClick={() => pushModal({ kind: 'account' })}
+            title="บัญชีและเกมของฉัน"
+          >
             บัญชี
           </button>
           <button
@@ -58,7 +69,7 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
           >
             เล่นหลายคน
           </button>
-          <button className="btn icon" onClick={() => newGame()}>
+          <button className="btn icon" onClick={() => pushModal({ kind: 'newGame' })}>
             เริ่มใหม่
           </button>
         </div>
@@ -88,15 +99,13 @@ export function Hud({ mode, onCycleTheme }: { mode: ThemeMode; onCycleTheme: () 
               className="chip"
               key={k}
               title={
-                k === 'rice'
-                  ? `${RESOURCES[k].name} (หักเสบียงทัพ ${upkeepOf(state, ME)})`
-                  : RESOURCES[k].name
+                k === 'rice' ? `${labels[k].name} (หักเสบียงทัพ ${upkeepOf(state, ME)})` : labels[k].name
               }
             >
-              <span>{RESOURCES[k].icon}</span>
+              <span>{labels[k].icon}</span>
               <span className="v">{me.res[k]}</span>
               <span className={`d ${income[k] < 0 ? 'neg' : ''}`}>{signed(income[k])}</span>
-              <span className="lbl">{RESOURCES[k].name}</span>
+              <span className="lbl">{labels[k].name}</span>
             </div>
           ))}
         </div>

@@ -10,6 +10,7 @@ export type {
   DbGame,
   DbSeat,
   DbSnapshot,
+  LegacyRecord,
   ReplayData,
 } from './types.js';
 export { createMemoryDb } from './memory.js';

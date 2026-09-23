@@ -1,3 +1,5 @@
+import type { LegacyCategory } from './content/legacy.js';
+
 export type FactionId = string;
 export type TerrainId = 'C' | 'K' | 'L' | 'S' | 'M';
 export type SeasonId = 'rain' | 'cool' | 'hot';
@@ -7,7 +9,11 @@ export type Cost = Partial<Resources>;
 export type BuildingId = 'granary' | 'market' | 'temple' | 'academy' | 'walls' | 'port';
 export type PerkId = 'irrig' | 'powder' | 'print';
 export type PowerId = 'lion' | 'eagle';
-export type EndingId = 'ashes' | 'shadow' | 'empire' | 'river' | 'wisdom' | 'survive';
+/**
+ * `union` is never *evaluated* at game end — it is set directly when a human accepts another
+ * human's union proposal (ADR-0008), which is why it is not in `ENDING_ORDER`.
+ */
+export type EndingId = 'ashes' | 'shadow' | 'empire' | 'river' | 'wisdom' | 'survive' | 'union';
 export type SeatId = 'center' | 'north' | 'east' | 'south';
 export type Coord = readonly [c: number, r: number];
 
@@ -69,6 +75,15 @@ export interface Faction {
   /** AI only: seasons until a new army is raised */
   recruitCd: number;
   ending: EndingId | null;
+  /** Legacy carried in from this player's previous chapter (docs/adr/0007 Addendum 9) — absent = none */
+  legacy?: FactionLegacy;
+}
+
+export interface FactionLegacy {
+  /** merged, capped totals per category (fractions, e.g. 0.08 = +8%) — what the UI shows */
+  totals: Record<LegacyCategory, number>;
+  /** ongoing multiplier on this faction's city yields, applied every season by `computeIncome` */
+  yieldMultiplier: Partial<Record<ResourceId, number>>;
 }
 
 export interface Relation {
@@ -85,7 +100,8 @@ export interface PendingDecision {
   demand: number;
 }
 
-export type ProposalKind = 'peace';
+/** `peace`: end a war between two humans. `union`: `from` absorbs `to` peacefully if `to` accepts (ADR-0008). */
+export type ProposalKind = 'peace' | 'union';
 
 /** A proposal one human sends another; only 'to' can answer it. Not a PendingDecision — does not block the sender's own turn. */
 export interface DiplomaticProposal {
@@ -135,6 +151,8 @@ export interface ChronicleEntry {
 
 export interface GameState {
   schemaVersion: 1;
+  /** which ChapterDefinition (content/chapters/*) this game's content came from */
+  chapterId: string;
   seed: number;
   /** mulberry32 state — all randomness goes through this so the server can replay */
   rng: number;

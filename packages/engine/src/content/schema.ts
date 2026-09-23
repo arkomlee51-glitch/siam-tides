@@ -40,6 +40,23 @@ export interface ChapterManifest {
   yearsLabel: string;
   /** one-paragraph blurb */
   summary: string;
+  /**
+   * false = content is Claude's draft, not yet checked by the historian ROADMAP.md calls for;
+   * the UI labels such chapters "ร่าง". Every chapter so far is false.
+   */
+  historianReviewed: boolean;
+}
+
+/**
+ * Era-specific text the chassis shows but that is not a mechanic — a 19th-century gunboat
+ * makes no sense in the 13th century. `{P}` = a foreign power's name, `{capital}` = the
+ * player's capital, `{years}` = game length in years.
+ */
+export interface ChapterFlavorData {
+  /** when a foreign power's patience runs out (the ultimatum decision) */
+  ultimatum: { icon: string; title: string; text: string; arrivedLog: string; paidChronicle: string };
+  /** first-game intro modal */
+  intro: { kicker: string; heading: string; body: string };
 }
 
 export interface ResourceLabel {
@@ -54,6 +71,8 @@ export interface TerrainDefData {
   cost: number;
   def: number;
   yield: PartialResourceAmounts;
+  /** seasonal-disaster ids this terrain is exposed to, e.g. `['flood']` — see turn.ts */
+  disasterExposure?: readonly string[];
 }
 
 export interface SeasonDefData {
@@ -70,6 +89,18 @@ export interface SeasonDefData {
   tip: string;
 }
 
+/**
+ * What a building does beyond its base `yield`, as data — same "effect declared as
+ * data, applied generically" pattern as `PerkEffect` (see docs/adr/0007 Addendum 5).
+ * `disaster` is a free-form id (e.g. `'flood'`) matched against a terrain's
+ * `disasterExposure` and a seasonal event's own disaster id in `turn.ts` — not an
+ * enum, so a future chapter can introduce disasters this one never had.
+ */
+export type BuildingEffect =
+  | { kind: 'stabilityPerCity'; amount: number }
+  | { kind: 'disasterLossReduction'; disaster: string; reducedLoss: number }
+  | { kind: 'cityDefenseMultiplier'; multiplier: number };
+
 export interface BuildingDefData {
   id: string;
   name: string;
@@ -78,7 +109,21 @@ export interface BuildingDefData {
   yield: PartialResourceAmounts;
   coastalOnly?: boolean;
   garrisonBonus?: number;
+  /** narrative/mechanical effects beyond base yield — see `BuildingEffect` doc comment */
+  effects?: readonly BuildingEffect[];
 }
+
+/**
+ * What a perk actually DOES, as data — not a hard-coded string-id check in economy.ts/
+ * combat.ts. See docs/adr/0007 Addendum 4. A perk can carry more than one effect (e.g.
+ * a "renaissance" perk could boost both know and faith at once); each effect kind is
+ * applied generically by every chapter, since all six chapters share identical
+ * mechanics and differ only in flavor (names/desc/numbers), per the product decision
+ * in ADR-0007 Addendum 4.
+ */
+export type PerkEffect =
+  | { kind: 'resourceMultiplier'; resource: CoreResourceId; multiplier: number }
+  | { kind: 'combatMultiplier'; multiplier: number };
 
 export interface PerkDefData {
   id: string;
@@ -86,6 +131,8 @@ export interface PerkDefData {
   at: number;
   name: string;
   desc: string;
+  /** what it does, applied generically — see `PerkEffect` doc comment */
+  effects: readonly PerkEffect[];
 }
 
 export interface ForeignPowerDefData {
@@ -132,7 +179,6 @@ export interface ChapterRulesData {
   riverBonus: PartialResourceAmounts;
   coastalWealth: number;
   cityDefense: number;
-  wallsDefense: number;
   capitalDefense: number;
   humanCapitalGarrison: number;
   newCityGarrison: number;
@@ -184,6 +230,9 @@ export interface ChapterDefinition {
   endingOrder: readonly string[];
   /** join order = seat order; humans fill seats first, the rest are AI */
   seats: readonly SeatDefData[];
+  /** name pool `found` draws from, cycling in order (see actions.ts) */
+  newCityNames: readonly string[];
+  flavor: ChapterFlavorData;
 }
 
 export class ChapterValidationError extends Error {
@@ -244,6 +293,11 @@ export function validateChapterDefinition(def: ChapterDefinition): void {
   }
   for (const e of def.endingOrder ?? []) {
     if (!endingIds.has(e)) issues.push(`endingOrder references unknown ending '${e}'`);
+  }
+
+  if (!def.newCityNames?.length) issues.push('newCityNames must have at least one entry');
+  if (!def.flavor?.ultimatum?.title || !def.flavor?.intro?.heading) {
+    issues.push('flavor.ultimatum and flavor.intro are required');
   }
 
   if (!def.seats?.length) issues.push('seats must have at least one entry');

@@ -87,12 +87,12 @@ rewire ให้อ่านจาก `ChapterDefinition` จริง (ข้�
 
 ## Options Considered
 
-| ตัวเลือก | ทำไมไม่เลือก |
-| --- | --- |
-| Resource ID เป็น data-driven เต็มรูปแบบต่อบท | ต้องมี conversion table ข้ามบทสำหรับ Legacy ซับซ้อนเกินความคุ้มค่าของเกมขนาดนี้ |
-| Legacy bonus ผูกกับ building/perk id เฉพาะบท (เช่น "มีวัดในบทก่อน → +1 ศรัทธา") | ใช้ไม่ได้ข้ามบทที่ไม่มี building นั้น ต้องมี mapping ต่อคู่บทซึ่งจะยิ่งซับซ้อนขึ้นเรื่อย ๆ ทุกบทใหม่ที่เพิ่ม (O(n²)) |
-| Legacy ไม่มี cap ปล่อยให้สะสมอิสระ | เสี่ยง snowball ร้ายแรง — ผู้เล่นที่เก่งบทแรกจะแทบไม่แพ้บทหลัง ขัดกับที่ ROADMAP.md ระบุไว้ตั้งแต่ต้นว่า "มีเพดานกัน snowball" |
-| rewire เอนจินให้อ่าน `ChapterDefinition` ไปพร้อมกันเลยในรอบนี้ | ขนาดงานใหญ่เกินจะทำในรอบเดียวอย่างรอบคอบ เสี่ยงทำของที่ทำงานอยู่แล้ว (38 เทสต์, เกมที่เล่นได้จริงวันนี้) พัง — แยกเป็นงานถัดไปที่ตรวจสอบได้เป็นขั้น ๆ ดีกว่า |
+| ตัวเลือก                                                                        | ทำไมไม่เลือก                                                                                                                                                 |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Resource ID เป็น data-driven เต็มรูปแบบต่อบท                                    | ต้องมี conversion table ข้ามบทสำหรับ Legacy ซับซ้อนเกินความคุ้มค่าของเกมขนาดนี้                                                                              |
+| Legacy bonus ผูกกับ building/perk id เฉพาะบท (เช่น "มีวัดในบทก่อน → +1 ศรัทธา") | ใช้ไม่ได้ข้ามบทที่ไม่มี building นั้น ต้องมี mapping ต่อคู่บทซึ่งจะยิ่งซับซ้อนขึ้นเรื่อย ๆ ทุกบทใหม่ที่เพิ่ม (O(n²))                                         |
+| Legacy ไม่มี cap ปล่อยให้สะสมอิสระ                                              | เสี่ยง snowball ร้ายแรง — ผู้เล่นที่เก่งบทแรกจะแทบไม่แพ้บทหลัง ขัดกับที่ ROADMAP.md ระบุไว้ตั้งแต่ต้นว่า "มีเพดานกัน snowball"                               |
+| rewire เอนจินให้อ่าน `ChapterDefinition` ไปพร้อมกันเลยในรอบนี้                  | ขนาดงานใหญ่เกินจะทำในรอบเดียวอย่างรอบคอบ เสี่ยงทำของที่ทำงานอยู่แล้ว (38 เทสต์, เกมที่เล่นได้จริงวันนี้) พัง — แยกเป็นงานถัดไปที่ตรวจสอบได้เป็นขั้น ๆ ดีกว่า |
 
 ## Addendum (รอบต่อมาในวันเดียวกัน): เตรียมที่เก็บ Legacy ใน Supabase + วิธีทดสอบ migration โดยไม่ต้องมี Docker
 
@@ -148,19 +148,356 @@ terrain/perk/power id ต่างจาก `data.ts` เข้าไปตอ�
 เป๊ะ ๆ (เพราะ `types.ts` เองก็ยังไม่ data-driven) — จะหมดปัญหานี้เมื่อ `types.ts` ถูก generalize เป็นส่วนหนึ่ง
 ของ rewire รอบถัดไป
 
+## Addendum 3 (รอบต่อมา): พบข้อจำกัดสำคัญของแผน rewire เดิม — กลไกเฉพาะบทฝังอยู่ในโค้ด ไม่ใช่แค่ข้อมูล
+
+ระหว่างจะ rewire `economy.ts`/`turn.ts` ต่อจาก Addendum 2 (ทำ `cityYield`/`computeIncome` ให้อ่าน
+`chapter.terrain`/`chapter.buildings`/`chapter.rules` แทน `data.ts`) พบว่าแผนเดิม ("สลับ import จาก
+`data.ts` เป็น `chapter.X`") ใช้ไม่ได้ตรง ๆ กับทุกจุด เพราะมีโค้ดหลายจุดที่ฝัง**กลไกเฉพาะของบทนี้**ไว้ใน
+ตรรกะจริง ไม่ใช่แค่ตัวเลขในตาราง:
+
+- `economy.ts` คำนวณรายได้โดยอ้างอิง perk id ตรง ๆ: `hasPerk(f, 'irrig') ? 1.2 : 1` (ข้าว +20%),
+  `hasPerk(f, 'print')` (ความรู้ +30%) — schema (`PerkDefData`) มีแค่ `{id, at, name, desc}` ไม่มีข้อมูล
+  "ผล" ของ perk เลย ผลจริงเขียนเป็นโค้ด hardcode ตรงนี้
+- `combat.ts` เช่นกัน: `hasPerk(attF, 'powder') ? 1.2 : 1` (โบนัสรบ +20%)
+- `turn.ts` อ้างอิง building id ตรง ๆ (`buildings.includes('temple')` ให้เสถียรภาพ, `includes('granary')`
+  ลดความเสียหายน้ำท่วม) และ terrain id ตรง ๆ (`terrainAt(...) === 'C'` = "พื้นที่ลุ่มเสี่ยงน้ำท่วม")
+  เหตุการณ์ประจำฤดู (น้ำท่วมหน้าฝน, งานบุญหน้าหนาว, ภัยแล้งหน้าร้อน) เป็น narrative เฉพาะภูมิศาสตร์ลุ่มน้ำ
+  เจ้าพระยา เขียนเป็นโค้ดตรง ๆ ไม่ใช่ข้อมูล
+- `turn.ts` อ้างอิง `f.powers.lion.patience`/`f.powers.eagle.patience` ตรง ๆ — กลไก "ไผ่ลู่ลม" ระหว่าง
+  สองมหาอำนาจเป็นกลไกที่ผูกกับ `PowerId` literal 2 ค่านี้เท่านั้น แม้แต่ `Faction.powers` (types.ts) เองก็
+  พิมพ์เป็น `Record<PowerId, {patience}>` ตายตัว
+
+**คำถามที่ต้องให้ลีตัดสินใจก่อนไปต่อ**: 6 บทมีกลไกแกนกลาง (bamboo diplomacy ระหว่างสองมหาอำนาจ, เหตุการณ์
+ประจำฤดูแบบนี้, สูตรเศรษฐกิจแบบนี้) **เหมือนกันทุกบทแค่เปลี่ยนหน้าตา/ชื่อ** หรือ**แต่ละบทควรมีกลไกต่างกันจริง
+ตามยุค** (เช่น บทก่อนประวัติศาสตร์อาจไม่มี "มหาอำนาจต่างชาติกดดันทางการทูต" เป็นกลไกเลย) — คำตอบเปลี่ยนขนาด
+งานที่เหลือทั้งหมด: ถ้าเป็นแบบแรก แค่ต้องทำ **ระบบ "effect" ทั่วไป** (เช่น `PerkDef.effect: {resource,
+multiplier}`, `SeasonalEventDef` ที่ประกาศเงื่อนไข/ผลเป็นข้อมูลแทนโค้ด) ซึ่งยังใหญ่แต่ทำได้ในเอนจินเดียว
+ถ้าเป็นแบบหลัง จะต้องมีจุดขยาย (hook) ให้แต่ละบทเสียบตรรกะของตัวเองได้ ซึ่งเป็นงานสถาปัตยกรรมที่ใหญ่กว่ามาก
+
+**ตัดสินใจไว้ก่อน**: ไม่รีบเดาเอง หยุด rewire ที่ `economy.ts`/`turn.ts`/`combat.ts` ไว้ตรงนี้ (โค้ดยังอยู่ใน
+สภาพทำงานได้ ทดสอบผ่านครบ ไม่มีอะไรพัง) รอคำตอบจากลีก่อนว่าอยากให้ไปทางไหน — สไลซ์ `state.ts` ที่ทำไปแล้ว
+(Addendum 2) ยังมีประโยชน์ไม่ว่าคำตอบจะเป็นทางไหน เพราะชั้น "ตั้งค่าเริ่มต้น" เป็น data-driven ได้จริงไม่ว่า
+กรณีไหน
+
+## Addendum 4 (รอบต่อมา): ลีตัดสินใจแล้ว — เหมือนกันทุกบท แค่เปลี่ยนหน้าตา → เริ่มระบบ "effect" ทั่วไป
+
+ลีตอบคำถามใน Addendum 3 แล้ว: **6 บทใช้กลไกแกนกลางเดียวกัน แค่เปลี่ยนชื่อ/หน้าตา/ตัวเลข ไม่ใช่กลไกต่างกันจริง
+ตามยุค** — แปลว่าทางที่ถูกคือสร้าง **ระบบ effect ทั่วไปในเอนจินเดียว** (perk ประกาศ "ผล" เป็นข้อมูล ไม่ใช่
+สาขาโค้ดที่ผูกกับ perk id ตรง ๆ) ไม่ใช่จุดขยาย (hook) ให้แต่ละบทเสียบตรรกะของตัวเอง
+
+ทำสไลซ์แรกของระบบนี้แล้ว — **perk effects**:
+
+- `PerkDefData` (schema.ts) เพิ่มฟิลด์ `effects: readonly PerkEffect[]` โดย `PerkEffect` เป็น discriminated
+  union: `{kind:'resourceMultiplier', resource: CoreResourceId, multiplier: number}` กับ
+  `{kind:'combatMultiplier', multiplier: number}` — `data.ts`'s `PERKS` ประกาศ effect จริงของ 3 perk เดิม
+  (`irrig`→rice×1.2, `powder`→combat×1.2, `print`→know×1.3) เป็นข้อมูลแบบนี้แทนโค้ด
+- **`GameState` มีฟิลด์ใหม่ `chapterId: string`** — จุดที่ขาดไปก่อนหน้านี้: `createGame` เซ็ต `chapterId`
+  ตอนสร้างเกม แต่ไม่เคยเก็บไว้ใน state เลย ฟังก์ชัน pure อย่าง `computeIncome`/`checkPerks`/`resolveBattle`
+  เลยไม่มีทางรู้ว่าเกมนี้มาจากบทไหน — เพิ่ม registry เล็ก ๆ `content/chapters/index.ts` (`CHAPTERS`,
+  `getChapterById`) ให้ฟังก์ชันเหล่านี้ lookup เนื้อหาบทจาก `s.chapterId`/`ctx.s.chapterId` แทนการรับ
+  `ChapterDefinition` เป็นพารามิเตอร์เพิ่ม (คง signature เดิมไว้ ไม่กระทบ caller ใน `turn.ts`/`ai.ts`/
+  `actions.ts`/เว็บ) — เหตุผลที่เก็บแค่ `chapterId: string` ใน `GameState` แทนที่จะฝัง `ChapterDefinition`
+  ทั้งก้อน: ไม่อยากให้ snapshot ที่ส่งผ่านเครือข่ายหรือเก็บใน Supabase ทุกเทิร์นพองขึ้นเพราะแบก map/buildings/
+  perks ทั้งบทไปด้วย — same pattern ที่ `data.ts` เดิมไม่เคยฝังใน `GameState` เหมือนกัน
+- `economy.ts` เพิ่ม `resourceMultiplier(f, resource, chapter)` — คูณ effect ของทุก perk ที่ปลดล็อกแล้วที่
+  ตรงกับ resource นั้น (`kind:'resourceMultiplier'`) แทน `hasPerk(f,'irrig')?1.2:1`/`hasPerk(f,'print')`
+  เดิม — `computeIncome` เรียกใช้แทน — `checkPerks` เปลี่ยนมาวน `chapter.perks` (จาก registry) แทน `PERKS`
+  จาก `data.ts` ตรง ๆ ด้วย เพื่อให้ "perk ที่มีอยู่จริง" มาจากแหล่งเดียวกับ "ผลของ perk"
+- `combat.ts` เพิ่ม `combatMultiplier(f, chapter)` แทน `hasPerk(attF/defF,'powder')?1.2:1` เดิม —
+  `resolveBattle` เรียกใช้แทน — บรรทัด flavor text ที่เคย hardcode ชื่อ "วิทยาการดินปืน" กับ `×1.2` ตรง ๆ
+  ก็ทำให้ทั่วไปด้วย (พิมพ์ตัวคูณจริงที่คำนวณได้ ไม่ผูกกับชื่อ perk เฉพาะ)
+- เทสต์ใหม่ 5 เคสใน `content-schema.test.ts` พิสูจน์ตรง ๆ ว่าไม่ได้แอบผูกกับ literal string `'irrig'`/
+  `'powder'`/`'print'` อีกต่อไป — เคสสำคัญที่สุดคือสร้าง perk ที่เอนจินไม่เคยรู้จักชื่อเลย (`'monsoon-canals'`,
+  `'steel-hulls'`) แล้วพิสูจน์ว่า `resourceMultiplier`/`combatMultiplier` ยังใช้ effect data ได้ถูกต้อง
+
+**ขอบเขตที่ยังไม่ทำ (ตั้งใจหยุดตรงนี้)**:
+
+1. **Registry lookup ผูกกับ id ไม่ใช่ object ที่ส่งเข้า `createGame`** — `checkPerks`/`computeIncome`/
+   `resolveBattle` อ่านเนื้อหาบทจาก `getChapterById(s.chapterId)` (ของที่ลงทะเบียนไว้ใน `CHAPTERS`) ไม่ใช่
+   จาก `ChapterDefinition` object ที่ส่งเข้า `createGame({chapter: ...})` ตรง ๆ — ถ้า object ที่ส่งเข้ามามี
+   `manifest.id` เดียวกับที่ลงทะเบียนไว้แต่ `perks`/`rules` ต่างกัน ผลจริงตอนเล่นจะยึดตามของที่ลงทะเบียน ไม่ใช่
+   ของที่ส่งเข้ามา — ยังไม่กระทบอะไรตอนนี้เพราะมีแค่บทเดียวในระบบ จะเริ่มสำคัญเมื่อมีบทที่สองลงทะเบียนจริง
+2. **เหตุการณ์ประจำฤดู (`turn.ts`) กับกลไกสองมหาอำนาจ (bamboo diplomacy) ยังไม่แปลงเป็นข้อมูล** — ยัง
+   hardcode `buildings.includes('temple'/'granary')`, `terrainAt(...) === 'C'`, `f.powers.lion.patience`/
+   `f.powers.eagle.patience` เหมือนเดิมทุกอย่าง — Addendum 3 ระบุไว้แล้วว่าเป็นงานที่เหลือ ตอนนี้แค่ยืนยัน
+   ทิศทาง (ระบบ effect ทั่วไป ไม่ใช่ hook ต่อบท) แต่ยังไม่ได้ลงมือแปลงสองจุดนี้ — เป็นสไลซ์ถัดไป
+3. `ai.ts`/`powers.ts`/`endings.ts`/`actions.ts`/`views.ts`/`hex.ts`/`movement.ts` ยัง import จาก `data.ts`
+   ตรง ๆ เหมือนเดิม ไม่กระทบ
+4. `GameState.schemaVersion` ยังไม่ขยับจาก `1` แม้ `GameState` จะได้ฟิลด์บังคับใหม่ (`chapterId`) — โปรเจกต์
+   ยังไม่ปล่อยจริง ยังไม่มีระบบ migrate save เก่า ตั้งใจไม่ทำตอนนี้ (save/เกมค้างใน localStorage ของเครื่อง
+   dev ที่สร้างไว้ก่อนหน้านี้จะใช้ต่อไม่ได้ ต้องเริ่มเกมใหม่ — ยอมรับผลนี้เพราะยังไม่มีข้อมูลผู้เล่นจริง)
+
+ยืนยันด้วย: `npm run typecheck` ผ่านทั้ง engine/server/web, engine test suite 48 เคสผ่านหมด (43 เดิม + 5
+ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม เพราะ Redis), web 29 เคสผ่านหมด, `eslint .` และ
+`prettier --check` สะอาด, `npm run build -w @siam/engine` ผ่าน
+
+## Addendum 5 (รอบต่อมา): ขยายระบบ effect ไปถึงอาคาร/ภูมิประเทศ/สองมหาอำนาจ
+
+ต่อจาก Addendum 4 (ระบบ effect ของ perk) — ทำสไลซ์ที่สองตามทิศทางเดียวกัน (ลีตัดสินใจแล้วว่า 6 บทใช้กลไก
+แกนกลางเดียวกัน แค่เปลี่ยนหน้าตา) โดยแปลงจุดที่เหลือใน Addendum 3 ที่ยังทำได้โดยไม่ต้องคิดค้น schema
+เหตุการณ์ประจำฤดูแบบเต็มรูปแบบ:
+
+- **อาคารประกาศผลเป็นข้อมูล** — `BuildingDefData` เพิ่ม `effects?: readonly BuildingEffect[]`
+  (`stabilityPerCity` / `disasterLossReduction`) `data.ts` ประกาศผลจริงของ `temple` (เสถียรภาพ +1 ต่อเมือง)
+  และ `granary` (ลดความเสียหายน้ำท่วมเหลือ 8) เป็นข้อมูลแทน `buildings.includes('temple')`/
+  `buildings.includes('granary')` ที่ hardcode ไว้เดิมใน `turn.ts`
+- **ภูมิประเทศประกาศความเสี่ยงภัยเป็นข้อมูล** — `TerrainDefData` เพิ่ม `disasterExposure?: readonly string[]`
+  `TERRAIN.C` (ที่ราบลุ่ม) ประกาศ `['flood']` แทน `terrainAt(...) === 'C'` ที่ hardcode ไว้เดิม — `disaster`
+  เป็น free-form string (ไม่ใช่ enum) เพื่อให้บทอื่นนิยามภัยพิบัติที่เอนจินไม่เคยรู้จักได้ (เช่น แผ่นดินไหว
+  ดินถล่ม) โดยไม่ต้องแก้ type
+- **กลไกไผ่ลู่ลม (สองมหาอำนาจ) ทั่วไปแล้ว ไม่ผูกกับ `lion`/`eagle` ตรง ๆ** —
+  - `turn.ts`'s `internalAffairs`: เดิม `f.powers.lion.patience >= 2 && f.powers.eagle.patience >= 2`
+    (เช็คตรงกับ 2 ชื่อนี้เท่านั้น) → ตอนนี้ `allPowersPatient(f, chapter)` เช็คว่าทุกมหาอำนาจที่บทลงทะเบียน
+    ไว้มีความอดทน ≥ 2 หมด — ใช้ได้กับกี่มหาอำนาจก็ได้ ไม่ใช่ผูกตายตัวกับ 2
+  - `powers.ts`'s `offeringPower`: เดิม `year % 2 === 1 ? 'lion' : 'eagle'` (สลับตรงระหว่าง 2 ชื่อนี้) →
+    ตอนนี้ `offeringPower(chapter, year)` วนตามลำดับมหาอำนาจที่บทประกาศไว้จริง (`Object.keys(chapter.
+foreignPowers)`) — สำหรับบทที่ชิปวันนี้ (2 มหาอำนาจ) ให้ผลเหมือนเดิมทุกประการ
+  - `powers.ts` ทั้งไฟล์ (queueOffer/queueUltimatum/applyOffer/answerDecision/sendEnvoy/shiftMeter) รื้อจาก
+    อ่าน `POWERS`/`DEMANDS`/`COSTS`/`RULES` ของ `data.ts` ตรง ๆ มาอ่านจาก `chapter.foreignPowers`/
+    `chapter.demands`/`chapter.costs`/`chapter.rules` ผ่าน `getChapterById(ctx.s.chapterId)` แทน — ปิดไฟล์
+    นี้ทั้งไฟล์จากรายการที่ยัง "import จาก data.ts ตรง ๆ" ใน Addendum 2/3
+  - `turn.ts` เปลี่ยนทุกจุดที่อ้าง `RULES.*` (dangerZone/balancedZone/balancedKnowBonus/extremeLimit/
+    aiWarThreshold/aiWarChance/expansionIrritation) เป็น `chapter.rules.*` เช่นกัน เพราะ `ChapterRulesData`
+    มีฟิลด์เหล่านี้ครบอยู่แล้วตั้งแต่ Addendum 1 ไม่ต้องเพิ่ม schema ใหม่
+  - `apps/web/src/ui/BambooTab.tsx` ปรับตามลายเซ็นใหม่ของ `offeringPower` (ส่ง `earlyRattanakosinChapter`
+    เข้าไปตรง ๆ เพราะเว็บยังไม่ chapter-aware — ขอบเขตเดิม) และถือโอกาสทำให้การคำนวณ "ใครจะยื่นข้อเสนอปี
+    หน้า" ทั่วไปด้วย (เดิม `thisYear === 'lion' ? 'eagle' : 'lion'` ก็ผูกกับ 2 ชื่อนี้เหมือนกัน)
+- เทสต์ใหม่ 10 เคส พิสูจน์ทั้งความเท่ากันกับพฤติกรรมเดิม (`buildingStabilityBonus`/`disasterMitigation`/
+  `allPowersPatient`/`offeringPower` ให้ผลตรงกับบทที่ชิปวันนี้ทุกกรณี รวมเทสต์ end-to-end ผ่าน `endTurn`
+  จริงที่ผูกกับค่าที่ประกาศในข้อมูลโดยตรง ไม่ hardcode ตัวเลขซ้ำในเทสต์) และความเป็นระบบทั่วไปจริง (สร้าง
+  อาคาร/ภัยพิบัติ/มหาอำนาจที่เอนจินไม่เคยเห็นชื่อมาก่อน เช่น `shrine-of-unity`, `seawall`+`tsunami`, บทที่มี
+  มหาอำนาจ 1 หรือ 3 ราย ชื่อ `north`/`south`/`east` แล้วพิสูจน์ว่ากลไกยังทำงานถูกต้อง — รวมถึงเคสบทที่ไม่มี
+  มหาอำนาจเลยต้อง throw ข้อความชัดเจนแทนที่จะวนลูปพัง)
+
+**ขอบเขตที่ยังไม่ทำ (ตั้งใจหยุดตรงนี้)**: ตัวโครงสร้างเหตุการณ์ประจำฤดูเอง (ฤดูไหนเกิดอะไรได้บ้าง, โอกาส
+เกิดเท่าไร, ข้อความบรรยาย, ผลกระทบต่อความสัมพันธ์ทางการทูต) ยัง hardcode เป็นโค้ดใน `seasonalEvents`
+เหมือนเดิมทั้งหมด — ที่แปลงได้ในรอบนี้คือ "ภูมิประเทศไหนเสี่ยงภัยอะไร" กับ "อาคารไหนลดความเสียหายเท่าไร"
+เท่านั้น เพราะสองอย่างนี้มีรูปแบบชัดเจนพอจะออกแบบ schema ได้โดยไม่ต้องเดา ส่วนเหตุการณ์ทั้งหมด (ฤดูฝนน้ำท่วม,
+ฤดูหนาวงานบุญ/กระทบกระทั่งชายแดน, ฤดูร้อนภัยแล้ง/ของขวัญ) ยังเป็นเนื้อหาเฉพาะภูมิศาสตร์ลุ่มน้ำเจ้าพระยาที่
+ผูกกับฤดูกาลไทย 3 ฤดู — ออกแบบ `SeasonalEventDef` แบบเต็มรูปแบบตอนนี้เสี่ยงเดาผิดเพราะยังไม่รู้ว่าอีก 5 บทที่
+เหลือ (รอที่ปรึกษาประวัติศาสตร์ตาม ROADMAP.md) ต้องการเหตุการณ์แบบไหนจริง ๆ — รอเนื้อหาบทจริงอย่างน้อยอีกบท
+หนึ่งก่อนออกแบบ schema นี้จะปลอดภัยกว่า เก็บไว้เป็นงานถัดไปที่ยังไม่ลงมือ
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, engine test suite 58 เคสผ่านหมด (48 เดิม + 10
+ใหม่), server 63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint .` และ `prettier --check` สะอาด,
+`npm run build -w @siam/engine` ผ่าน
+
+## Addendum 6 (รอบต่อมา): endings/actions/views + ครึ่งหนึ่งของ ai.ts อ่านจาก chapter — และเหตุผลที่หยุดก่อนแตะ hex.ts/movement.ts
+
+ต่อจาก Addendum 5 — ตรวจไฟล์ที่เหลือทั้งหมดที่ยัง `import ... from './data.js'` ตรง ๆ (`ai.ts`/`endings.ts`/
+`actions.ts`/`views.ts`/`hex.ts`/`movement.ts`) ทีละไฟล์ เพื่อแยกว่าไฟล์ไหนเป็นกลไกที่ผูกกับเนื้อหา (ต้องรื้อ)
+กับไฟล์ไหนเป็น chassis/เรขาคณิตล้วน ๆ:
+
+- **`ChapterDefinition` เพิ่มฟิลด์ `newCityNames: readonly string[]`** (พร้อม validation ว่าต้องมีอย่างน้อย 1
+  ชื่อ) — พอร์ต `NEW_CITY_NAMES` จาก `data.ts` เข้า `early-rattanakosin.ts` แบบเดียวกับฟิลด์อื่น เป็นช่องว่าง
+  schema จริงที่เพิ่งเจอตอนรื้อ `found` handler (พูลชื่อเมืองใหม่ไม่เคยอยู่ใน schema เลยตั้งแต่ Addendum 1)
+- **`endings.ts`** — `evaluateEnding`/`finishGame` อ่าน `chapter.endings`/`chapter.rules.extremeLimit`/
+  `chapter.rules.balancedZone` แทน `ENDINGS`/`RULES` — แต่จงใจ**ไม่แตะ**โครงสร้างการตัดสินตอนจบ (`EndingId`
+  6 ค่า, ลำดับเงื่อนไข, เกณฑ์ตัวเลข) เพราะตรงกับคำตอบของลีใน Addendum 4 ("เหมือนกันทุกบทแค่เปลี่ยนหน้าตา")
+  ที่สุด: `EndingId` เป็น literal union คงที่แบบเดียวกับ `CoreResourceId` — ตอนจบ 6 แบบกับกลไกตัดสินเป็น
+  chassis ของทุกบท มีแค่ชื่อ/ไอคอน/ข้อความที่เปลี่ยนต่อบท ซึ่ง `chapter.endings[id]` ให้อยู่แล้ว
+- **`actions.ts` ทั้งไฟล์** — `BUILDINGS`/`COSTS`/`NEW_CITY_NAMES`/`RULES` เปลี่ยนเป็น `chapter.buildings`/
+  `chapter.costs`/`chapter.newCityNames`/`chapter.rules` — `Handler<A>` ได้พารามิเตอร์ตัวที่ 4
+  `chapter: ChapterDefinition` และ `applyAction` resolve `getChapterById(s.chapterId)` ครั้งเดียวก่อนเรียก
+  handler (handler ที่ไม่ใช้ chapter อย่าง `move`/`attack`/`camp`/`envoy`/`answerDecision`/`endTurn` ไม่ต้อง
+  แก้ signature — TypeScript ยอมให้ฟังก์ชันที่รับพารามิเตอร์น้อยกว่าเข้ากับ type ที่มีพารามิเตอร์มากกว่า)
+  signature สาธารณะของ `applyAction`/`foundBlocker` ไม่เปลี่ยน จึงไม่กระทบ server/web
+- **`views.ts`** — `describeDecision` อ่าน `chapter.foreignPowers`/`chapter.demands`/`chapter.costs.ultimatum`
+  แทน `POWERS`/`DEMANDS`/`COSTS`
+- **`ai.ts` ครึ่งเดียวโดยตั้งใจ** — `RULES.aiRecruitStr`/`aiRecruitCooldown`/`aiPeaceStrCap`/`aiWarStrCap`/
+  `aiWeakStr` เป็น `chapter.rules.*` แล้ว แต่บรรทัดค่าเดินใน `stepAlong` (`TERRAIN[terrainAt(...)].cost`)
+  ยัง import `TERRAIN` จาก `data.ts` ตรง ๆ — เป็นโค้ดตัวเดียวกับที่ `movement.ts` ใช้ จึงผูกกับการตัดสินใจ
+  เรื่อง hex.ts/movement.ts ด้านล่าง (มีคอมเมนต์ชี้มาที่ addendum นี้ในไฟล์)
+
+**ตัดสินใจไม่ทำ (ไม่ใช่แค่ยังไม่ได้ทำ): `hex.ts`/`movement.ts`** — ต่างจากไฟล์อื่นโดยพื้นฐาน ด้วยเหตุผล 4 ข้อ:
+
+1. **`hex.ts` คำนวณ `ROWS`/`COLS`/`riverSet` เป็น module-level singleton ตอน import** (จาก `MAP`/`RIVER`)
+   ไม่ใช่ค่าที่คำนวณต่อ call — ทำให้ทั่วไปต้องเปลี่ยนแทบทุกฟังก์ชันเรขาคณิต (`tileAt`/`terrainAt`/
+   `neighbors`/`hexCenter`/`pixelToHex`/`tilesWithin` ฯลฯ) ให้รับแผนที่เป็นพารามิเตอร์
+2. **ใช้กว้างกว่าเอนจิน** — `apps/web/src/map/MapRenderer.ts`/`geometry.ts` เรียก `hex.ts` ตรง ๆ เพื่อวาด
+   แผนที่โดยไม่ผ่าน `GameState` การรื้อจะลามไปทั้งสอง package
+3. **เซิร์ฟเวอร์ถือหลายเกมพร้อมกันในโปรเซสเดียว** — ถ้าเปลี่ยน singleton เป็น state ต่อบท ต้องกันไม่ให้สอง
+   เกมที่ใช้บทต่างกันพร้อมกันชนกัน เป็นความเสี่ยงด้านความถูกต้องที่ไฟล์อื่นไม่มี (ไฟล์อื่นรับ `chapter` ต่อ
+   call อยู่แล้ว)
+4. **ยังไม่รู้ว่าบทอื่นจะมีแผนที่ของตัวเองจริงไหม** — เป็นไปได้ที่ 6 บทใช้ภูมิศาสตร์ลุ่มน้ำเดียวกันต่างยุค
+   และความต่างเชิงกลไกทั้งหมดมาจาก `chapter.terrain`/`chapter.buildings` ที่เป็นข้อมูลแล้ว โดยไม่ต้องมีแผนที่
+   hex ต่างกันเลย — รื้อตอนนี้เสี่ยงเดาโครงสร้างผิด เหตุผลเดียวกับที่เลื่อน `SeasonalEventDef` ใน Addendum 5
+   (รอเนื้อหาบทจริงอย่างน้อยอีกหนึ่งบท)
+
+**เทสต์ใหม่ 5 เคส**ใน `content-schema.test.ts` — ฟังก์ชันกลุ่มนี้รับ `GameState` ไม่ใช่ `ChapterDefinition`
+จึงพิสูจน์ความเป็นระบบทั่วไปด้วยการลงทะเบียนบททดสอบชั่วคราวใน `CHAPTERS` แล้วถอดออกใน `finally`
+(จำลองวิธีลงทะเบียนบทที่สองจริง):
+
+- `found` ใช้ชื่อเมือง/ต้นทุน/กองรักษาการณ์จาก `chapter.newCityNames`/`chapter.costs.found`/
+  `chapter.rules.newCityGarrison` (ชื่อเมืองที่ไม่มีในรายการจริงเลย, ต้นทุนเทียบกับ `scaleCost` ตามฤดูจริง)
+- `build` ใช้ต้นทุนจาก `chapter.buildings.market.cost` — id เดิมแต่ค่าต่างกัน เพราะ `BuildingId` ยังเป็น
+  literal union คงที่ (แบบเดียวกับ `EndingId`/`PowerId`) คิด id ใหม่จะไม่ผ่าน TypeScript
+- `runAi` เกณฑ์ทัพสำรองด้วย `chapter.rules.aiRecruitStr`/`aiRecruitCooldown`
+- `describeDecision` ใช้ชื่อมหาอำนาจ/ข้อเรียกร้องจาก `chapter.foreignPowers`/`chapter.demands`
+- `finishGame` บันทึก chronicle ด้วยชื่อตอนจบจาก `chapter.endings`
+
+export เพิ่มจาก `index.ts` ให้เทสต์เรียกตรงได้: `runAi`, `finishGame` และ type `Ctx` (แบบเดียวกับที่ export
+`buildingStabilityBonus` ฯลฯ ใน Addendum 5) — และแก้คอมเมนต์ `CreateGameOptions.chapter` ใน `state.ts` ที่
+ล้าสมัยมาตั้งแต่ Addendum 5 (ยังบอกว่า `powers.ts`/อาคาร/ภูมิประเทศ hardcode อยู่) ให้ตรงกับสถานะจริง
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, engine 63 เคสผ่านหมด (58 เดิม + 5 ใหม่), server
+63 เคสผ่านหมด (9 skip ตามเดิม), web 29 เคสผ่านหมด, `eslint` ทั้ง src ของสาม package สะอาด, `prettier --check`
+สะอาด
+
+## Addendum 7 (รอบต่อมา): แก้ข้อสรุปที่เกินจริงใน Addendum 6 + ปิด economy/combat/movement + UI เว็บอ่านจาก chapter
+
+**แก้ไขข้อความใน Addendum 6 ตรง ๆ**: Addendum 6 (และ ROADMAP/คอมเมนต์ใน `state.ts` รอบนั้น) สรุปว่า
+gameplay logic "อ่านจาก chapter เกือบทั้งหมดแล้ว" — **ไม่จริง** รอบนั้นตรวจแค่ 6 ไฟล์ในรายการเดิม ไม่ได้ grep
+ทั้ง `src/` ใหม่ พอตรวจครบรอบนี้พบว่า `economy.ts` (`cityYield`: ผลผลิตภูมิประเทศ/อาคาร/แม่น้ำ/ชายฝั่ง,
+`upkeepOf`) กับ `combat.ts` (พลังรับของภูมิประเทศ/เมือง/เมืองหลวง, กองรักษาเมืองที่ยึดได้) ยังอ่าน
+`BUILDINGS`/`RULES`/`TERRAIN` จาก `data.ts` อยู่ — รอบก่อน ๆ รื้อแค่ส่วน perk ของสองไฟล์นี้ และเหตุผลที่เลื่อน
+`movement.ts` ใน Addendum 6 ก็ผิด: ฟังก์ชันใน `movement.ts` รับ `GameState` อยู่แล้ว ค่าเดินรายภูมิประเทศจึง
+อ่านจาก chapter ได้ตรง ๆ ปัญหา singleton จริง ๆ มีแค่ใน `hex.ts` (เหตุผล 4 ข้อใน Addendum 6 ยังใช้ได้กับ
+`hex.ts` เท่านั้น)
+
+รอบนี้ทำ:
+
+- **`economy.ts`** — `cityYield(city, chapter)` (**signature สาธารณะเปลี่ยน**: เพิ่มพารามิเตอร์ `chapter`
+  เพราะเดิมไม่มี state ให้ lookup) อ่าน `chapter.rules`/`chapter.terrain`/`chapter.buildings`, `upkeepOf`
+  อ่าน `upkeepPerStr` จาก chapter
+- **`combat.ts`** — พลังรับภูมิประเทศ/ชื่อภูมิประเทศ, `cityDefense`/`capitalDefense`, กองรักษาเมืองที่ยึดได้
+  อ่านจาก chapter — และ **ปิด literal building id ตัวสุดท้ายในเอนจิน**: `city.buildings.includes('walls')`
+  กลายเป็น `BuildingEffect` ชนิดใหม่ `{kind:'cityDefenseMultiplier', multiplier}` (`walls` ประกาศ 1.5 เท่า
+  เดิม) ผ่าน helper `buildingDefenseMultiplier(chapter, buildings)` — ลบ `wallsDefense` ออกจาก
+  `ChapterRulesData`/`RULES` ให้มีแหล่งค่าเดียว ข้อความรายงานศึกเปลี่ยนจาก "(มีกำแพง)" เป็น "(มี<ชื่ออาคาร>)"
+- **`movement.ts`/`ai.ts`** — ค่าเดินรายภูมิประเทศอ่านจาก `chapter.terrain` (ลบ `TERRAIN` import และคอมเมนต์
+  ที่อ้าง Addendum 6 ออกจาก `ai.ts`)
+- **UI เว็บ** — `apps/web/src/ui/format.ts` เพิ่ม `chapterOf(state)` (registry lookup ตัวเดียวกับเอนจิน) แล้ว
+  `BambooTab`/`DiplomacyTab`/`GoalsTab`/`Hud`/`InfoTab`/`Meters`/`Modals` อ่านค่าใช้จ่าย/กฎ/ชื่ออาคาร/ชื่อ
+  มหาอำนาจ/ตอนจบ/perk/ป้ายทรัพยากรจาก chapter — **เหตุผลที่สำคัญ**: ก่อนหน้านี้ถ้ามีบทที่สอง UI จะแสดงราคา
+  จาก `data.ts` แต่เอนจินเก็บเงินตามราคาของ chapter คนละค่ากัน — `costText(cost, chapter)` (signature ใหม่)
+  ใช้ไอคอนจาก `chapter.resourceLabels`; `BambooTab` แสดงมหาอำนาจสองฝั่งแถบไผ่ตาม `side` (แถบเป็นสองขั้วโดย
+  การออกแบบ ฝั่งหนึ่งมีหลายมหาอำนาจก็แสดงรวมกันได้); แก้ตัวเลขที่ hardcode ซ้ำใน UI ด้วย (`±25` ใน
+  `GoalsTab`, `🌾1 💰1` โบนัสแม่น้ำใน `InfoTab`)
+
+**ยังคงอ่าน `data.ts` โดยตั้งใจ (รายการครบ ตรวจด้วย grep ทั้ง `src/` แล้ว)**: `hex.ts` + `apps/web/src/map/
+MapRenderer.ts` (แผนที่ — Addendum 6), `state.ts`'s `seasonOf` + `SEASONS` ใน `Hud.tsx` (**ใหม่ในรายการนี้**:
+รายชื่อ/จำนวนฤดูผูกกับโค้ดเหตุการณ์ประจำฤดูใน `turn.ts` และ `S.id === 'rain'` ใน `ai.ts` ถ้าให้บทประกาศฤดู
+ของตัวเองก่อนมี `SeasonalEventDef` จะเกิดฤดูที่โค้ดเหตุการณ์ไม่รู้จัก จึงเลื่อนไปพร้อม Addendum 5 — UI ใช้
+`SEASONS` ตัวเดียวกับเอนจินเพื่อให้ตรงกันเสมอ), `RESOURCE_IDS` (chassis คงที่ตามข้อ 7), และ `apps/server/src/
+schemas.ts` (ลิสต์ `BuildingId`/`PowerId` สำหรับ validate คำสั่ง — ผูกกับ literal union ใน `types.ts` ด้วย
+compile-time assert อยู่แล้ว ขยายเมื่อ type ขยาย)
+
+**เทสต์ใหม่ 6 เคส**: engine 5 เคส — `buildingDefenseMultiplier` เท่ากับ walls ×1.5 เดิม + อาคารป้อมที่เอนจิน
+ไม่เคยรู้จัก (`bastion` ×2, ซ้อนกับ walls ได้ ×3), `cityYield` ตาม chapter ที่ส่งเข้าไป, ค่าเดินจาก chapter
+(ทุกภูมิประเทศค่า 99 → เดินได้แค่ก้าวแรกฟรี), `upkeepOf` จาก chapter; web 1 เคส — ลงทะเบียนบททดสอบที่เปลี่ยนชื่อ
+ยุ้งฉางและป้ายข้าว แล้วยืนยันว่า HUD/แผงเมืองแสดงชื่อจากบทนั้น ไม่ใช่ `data.ts` (เทสต์นี้จะล้มกับโค้ดเดิม)
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, `npm run build -w @siam/engine` ผ่าน, engine 68
+เคสผ่านหมด (63 + 5), server 63 ผ่านหมด (9 skip ตามเดิม), web 30 ผ่านหมด (29 + 1), `eslint` สะอาดทั้ง src/test,
+`prettier --check` สะอาดในไฟล์ที่แก้
+
+## Addendum 8 (รอบต่อมา): cold-start replay จำค่าตั้งเกมได้ครบ — `season_timer_seconds` + `chapter_id`
+
+ปิดค้างจากเฟส 5 (ADR-0006 ข้อ 8) ที่เลื่อนไว้เพราะ "ต้องออกแบบ+ทดสอบ migration ใหม่" — ตอนนี้ทดสอบ migration
+กับ Postgres จริงได้แล้ว (pglite, ดู Addendum แรก) เลยไม่ติดแล้ว และระหว่างทางเจอช่องว่างคู่กันอีกจุด:
+
+- **`games.chapter_id` มีคอลัมน์แล้วตั้งแต่ migration เฟส 6 แต่ server ไม่เคยเขียนหรืออ่านเลย** — replay จาก
+  genesis เรียก `createGame({ seed, maxTurn, humans })` โดยไม่ส่ง chapter เสมอ จึงสร้างเกมด้วยบท default
+  ทุกครั้ง ยังไม่กระทบเพราะมีบทเดียว แต่พอมีบทที่สอง เกมบทอื่นที่ Redis หมดอายุก่อนมี snapshot จะ replay ผิดบท
+  เงียบ ๆ (เส้นทางที่มี snapshot ไม่เป็นไร เพราะ `GameState.chapterId` อยู่ใน snapshot อยู่แล้ว)
+- **`season_timer_seconds`** — migration ใหม่ `20260923000000_game_settings.sql` เพิ่มคอลัมน์ `int` nullable
+  พร้อม check `> 0 และ <= 604800` (ตรงกับเพดานของ zod ใน `schemas.ts`; ขั้นต่ำ 30 วินาทียังบังคับที่ HTTP
+  เหมือนเดิม — DB ไม่บังคับ 30 เพราะเทสต์เรียก service ตรงด้วยค่า 1 วินาที)
+
+ทำ: `CreateGameInput`/`DbGame` เพิ่ม `chapterId`/`seasonTimerSeconds` (**บังคับทั้งคู่ใน input** ให้ผู้เรียก
+ทุกจุดต้องตัดสินใจเองชัด ๆ), `supabase.ts`/`memory.ts` เขียน/อ่านสองคอลัมน์นี้, `GameService` ส่ง
+`state.chapterId`/`seasonTimerSeconds` ตอนสร้างเกม และ replay ใช้ทั้งคู่ — `chapterId` เป็น null (เกมก่อน
+เฟส 6) → บท default; id ที่ไม่ได้ลงทะเบียน → `getChapterById` throw ชัด ๆ (ดีกว่า replay ผิดบทเงียบ ๆ)
+
+**ตัดสินใจเก็บแค่ "วินาทีต่อฤดู" ไม่เก็บ deadline ของฤดูปัจจุบัน**: ตอน replay เริ่มนับฤดูปัจจุบันใหม่เต็มช่วง —
+ผู้เล่นได้เวลาเพิ่มได้อย่างเดียว ไม่มีทางเสียเวลา (หลักเดียวกับข้อ 8 เดิมที่ว่าปลอดภัยกว่าเดาเวลาที่เหลือผิด) และ
+ไม่ต้องเขียน DB เพิ่มทุกครั้งที่ขึ้นฤดูใหม่ — ข้อแลก: เกมที่ cold-start บ่อยมากในฤดูเดียวอาจได้เวลายาวกว่าที่ตั้ง
+ไว้ ยอมรับได้เพราะ cold-start เกิดแค่ตอน Redis หมดอายุ/instance ใหม่ ไม่ใช่ทุก request
+
+เทสต์ใหม่ (server): `db.test.ts` ยืนยันค่ากลับมาครบจาก `loadForReplay`; `replay.test.ts` 2 เคส — ตัวจับเวลา
+รอด cold-start (60 วินาทีเดิม, deadline ใหม่ = เวลา replay + 60 วินาทีเต็ม) และ replay จาก genesis ใช้บทของเกม
+นั้นเอง (ลงทะเบียนบททดสอบที่ข้าวเริ่มต้น 999 แล้วยืนยันว่าเกมที่ replay ได้ 999 และ `chapterId` ถูก) — ทั้งสอง
+เคสจะล้มกับโค้ดเดิม (โค้ดเดิม hardcode `seasonTimerSeconds: null` และไม่ส่ง chapter)
+
+**ตรวจ migration กับ Postgres จริงผ่าน pglite** (รันใน scratch นอก repo แบบเดียวกับ Addendum แรก): รันทั้ง 3
+migration ตามลำดับผ่าน, คอลัมน์ได้ `integer`/nullable ถูก, ค่า 60/null/604800 ผ่าน, 0/−5/604801 ถูก check
+constraint ปฏิเสธ, chapter_id/season_timer_seconds อ่านกลับได้ถูก
+
+**บอกตรง ๆ เรื่องการทดสอบ migration**: ทั้งรอบนี้และ Addendum แรกเป็นการรันครั้งเดียวใน scratch — **ไม่มี
+เทสต์ migration ที่ commit อยู่ใน repo** (`@electric-sql/pglite` ไม่ได้อยู่ใน dependencies) — ตั้งใจไม่เพิ่ม
+dependency จากสภาพแวดล้อมนี้เพราะ `npm install` จาก VM ของ device bridge ลงใน `node_modules` บนเครื่องลี
+เสี่ยงสลับ binary เฉพาะแพลตฟอร์ม (rollup/esbuild ของ Windows vs Linux) และ VM นี้ลบไฟล์ไม่ได้ ถ้า npm ต้องลบ
+ของเก่าระหว่างติดตั้ง `node_modules` อาจค้างครึ่ง ๆ — ถ้าลีอยากให้มีเทสต์ migration ถาวรใน CI แนะนำให้รัน
+`npm i -D @electric-sql/pglite -w @siam/server` เองบนเครื่อง แล้วค่อยย้ายสคริปต์ตรวจเข้า `apps/server/test/`
+
+ยืนยันด้วย: `npm run typecheck` สะอาดทั้ง engine/server/web, server 65 ผ่านหมด (63 + 2, 9 skip ตามเดิม),
+`eslint` สะอาด — **ต้อง push migration ใหม่นี้ขึ้น Supabase project จริงด้วย** พร้อมสองไฟล์เดิมเมื่อตั้ง
+project แล้ว
+
+## Addendum 9 (รอบต่อมา): ต่อระบบ Legacy ข้ามบทเข้ากับ flow จริง
+
+**ลีตัดสินใจแล้ว**: Legacy ผูกกับผู้เล่นแต่ละคน (Supabase user) ไม่ต้องเล่นกลุ่มเดิมข้ามบท — แต่ละคนได้โบนัสจาก
+**บทล่าสุดที่ตัวเองเล่นจบ** (ตอบคำถามเชิงเกมเพลย์ที่ค้างไว้ตั้งแต่ Addendum แรก)
+
+**เอนจิน**:
+
+- `HumanSeatOptions.legacy` (ผลของ `mergeLegacyBonuses`) — `createGame` clamp ด้วย `clampLegacyTotals` ใหม่
+  (เพดานคือหัวใจของระบบ เอนจินจึงบังคับเองไม่เชื่อข้อมูลจาก DB) แล้วใช้ `applyLegacyBonuses` กับ state จริง:
+  เสถียรภาพเริ่มต้น, กำลังทัพเริ่มต้น (ปัดเศษ), ความสัมพันธ์เริ่มต้นกับแคว้น AI ทุกแคว้น, ทรัพยากรเริ่มต้น
+- ตัวคูณผลผลิตเมืองเป็นผล**ต่อเนื่องทุกฤดู** ไม่ใช่แค่ตอนเริ่ม — เก็บใน `Faction.legacy`
+  (`{ totals, yieldMultiplier }`, ฟิลด์ optional ใหม่) แล้ว `computeIncome` คูณทุกฤดู — อยู่ใน `GameState` เพื่อให้
+  snapshot/replay ได้ผลเดิมเสมอ
+- ไม่มี Legacy (หรือ Legacy ศูนย์ทุกหมวด) → เกมเหมือนเดิมทุกไบต์ (มีเทสต์ยืนยัน)
+- ข้อความ note ของ Legacy ใช้ชื่อบท (เช่น "ต้นรัตนโกสินทร์") แทน id ดิบ; เพิ่ม `LEGACY_LABELS` ภาษาไทยต่อหมวด
+
+**เซิร์ฟเวอร์**:
+
+- **จบเกม** → `GameService.recordFinish` (รวมสองจุดที่เคยเรียก `markFinished` ซ้ำกัน — `submit()` กับตัวจับเวลา
+  ฤดู) เขียน `player_legacy` ของผู้เล่นมนุษย์ทุกคน best-effort — **บันทึกแม้ Legacy ว่าง** เพราะกติกาคือ "บทล่าสุด
+  ที่เล่นจบ" ถ้าข้ามแถวว่างไป ผู้เล่นจะได้ Legacy ของบทเก่ากว่ามาแทนผิดกติกา
+- **เริ่มเกม** → `Db.loadLatestLegacy(userIds)` (แถว `computed_at` ใหม่สุดต่อผู้เล่น) → `mergeLegacyBonuses` →
+  ส่งเข้า `createGame` — โหลดไม่สำเร็จคืน 503 เหมือนเขียนเกมไม่สำเร็จ (ไม่สร้างเกมที่เงียบ ๆ ไม่มี Legacy)
+- **replay ต้องได้เกมเดิมเป๊ะ** → migration ใหม่ `20260923010000_seat_legacy.sql` เพิ่ม `game_players.legacy`
+  (jsonb) เก็บ Legacy ที่ใช้จริงตอนเริ่มเกม (หลัง clamp) — replay จาก genesis ใช้ค่านี้ **ไม่อ่าน
+  `player_legacy` ใหม่** (ซึ่งอาจเปลี่ยนไปแล้วถ้าผู้เล่นจบเกมอื่นระหว่างนั้น)
+
+**UI**: แท็บเป้าหมายมีการ์ด "มรดกจากบทก่อน" แสดงหมวดที่ได้ +x% (ไม่แสดงถ้าไม่มี)
+
+**ข้อสังเกตที่ตั้งใจไว้**: ตอนนี้มีบทเดียว เล่นบทเดิมซ้ำจึงได้ Legacy จากรอบก่อนของบทเดียวกัน — ตรงตามกติกา
+"บทล่าสุดที่เล่นจบ" ที่เลือก ถ้าภายหลังอยากให้นับเฉพาะบทอื่น (เช่นบทก่อนหน้าในลำดับ 1→6) แก้ที่
+`loadLatestLegacy`/`legacyFor` จุดเดียว — Legacy ของผู้เล่นคนอื่นเห็นได้ใน view (เหมือน perk) ไม่ได้ซ่อน
+
+เทสต์ใหม่: engine 6 เคส (ไม่มี Legacy = เกมเดิมทุกไบต์, ผลตรงกับ `applyLegacyBonuses`, clamp, income คูณเฉพาะ
+ทรัพยากรที่เกี่ยว, deterministic, note ใช้ชื่อบท), server 3 เคส (`legacy.test.ts`: จบเกม → บันทึก → เกมถัดไป
+ได้โบนัส ส่วนมือใหม่ไม่ได้ → Db เก็บ Legacy ต่อที่นั่ง → cold-start replay ได้เกมเดิมเป๊ะ; Legacy ที่ได้ตรงกับ
+เอนจิน; "บทล่าสุด" ข้ามบทและทับแถวเดิมถูก), web 1 เคส (การ์ดแสดง/ไม่แสดง) — ตรวจ migration กับ Postgres
+จริงผ่าน pglite (ใน scratch นอก repo เหมือน Addendum 8): ทั้ง 4 migration ผ่าน, `game_players.legacy` jsonb
+nullable อ่านกลับได้, upsert แบบเดียวกับ `supabase.ts` ทับแถวบทเดิมและเรียงใหม่สุดก่อนถูกต้อง
+
+ยืนยันด้วย: typecheck สะอาดทั้ง engine/server/web, engine 74, server 68 (9 skip ตามเดิม), web 31 ผ่านหมด,
+`eslint .` และ `prettier --check .` สะอาดทั้ง repo — **ต้อง push migration ทั้ง 4 ไฟล์ขึ้น Supabase จริง**
+
 ## Consequences
 
 - เกมที่ชิปวันนี้ (`data.ts` เดิม) **ไม่เปลี่ยนพฤติกรรมเลย** — ของใหม่ทั้งหมดอยู่ใน `packages/engine/src/content/`
   เป็น opt-in ยังไม่มีอะไรเรียกใช้จาก `createGame`/routes จริง
 - **ทำแล้วบางส่วน (Addendum 2)**: `createGame` อ่าน seats/starting rules/foreign powers จาก
-  `ChapterDefinition` แล้ว — **ยังไม่ทำ**: `economy`/`turn`/`ai`/`combat`/`powers`/`endings`/`actions`/
-  `views`/`hex`/`movement` (10 จาก 12 ไฟล์) ยัง import จาก `data.ts` ตรง ๆ — เล่นบทอื่นที่ต่างจาก `data.ts`
-  จริงยังทำไม่ได้จนกว่าจะ rewire ต่อ
+  `ChapterDefinition` แล้ว
+- **ทำแล้วบางส่วน (Addendum 4+5, ตามคำตอบลี — เหมือนกันทุกบทแค่เปลี่ยนหน้าตา)**: ระบบ effect ทั่วไปสำหรับ
+  perk (`resourceMultiplier`/`combatMultiplier`), อาคาร (`stabilityPerCity`/`disasterLossReduction`),
+  ภูมิประเทศ (`disasterExposure`) และกลไกสองมหาอำนาจ (`allPowersPatient`/`offeringPower` ทั่วไปแล้ว ไม่ผูก
+  `lion`/`eagle` ตรง ๆ, `powers.ts` ทั้งไฟล์อ่านจาก chapter แล้ว) — `GameState.chapterId` + registry
+  (`content/chapters/index.ts`) ให้ฟังก์ชัน pure lookup เนื้อหาบทได้จริง — **ยังไม่ทำ**: โครงสร้างเหตุการณ์
+  ประจำฤดูเอง (ฤดูไหนเกิดอะไร, โอกาสเกิด, ข้อความ) ยังฝังเป็นโค้ดใน `turn.ts`'s `seasonalEvents` เหมือนเดิม
+  — ตั้งใจรอเนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ schema นี้ (ดู Addendum 5)
+- **ทำแล้ว (Addendum 6+7)**: gameplay logic ทุกไฟล์ที่อ่านเนื้อหา (economy/combat/movement/ai/turn/powers/
+  endings/actions/views) และ UI เว็บอ่านจาก chapter แล้ว + ฟิลด์ `newCityNames` + effect `cityDefenseMultiplier`
+  (Addendum 6 เคยสรุปเกินจริง แก้ไว้ใน Addendum 7) — **ตั้งใจเลื่อน**: `hex.ts`/map renderer (แผนที่) กับ
+  `seasonOf`/`SEASONS` (ผูกกับโครงเหตุการณ์ประจำฤดู) ยังอ่าน `data.ts`
 - **ทำแล้ว (รอบต่อมาในวันเดียวกัน)**: ตาราง `player_legacy` + คอลัมน์ `games.chapter_id` — migration
-  ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม →
-  เขียนแถว, เริ่มเกมบทใหม่ → อ่านแถวมารวม) เพราะเป็นการตัดสินใจเชิงเกมเพลย์ที่ควรเป็นของลี ไม่ใช่ของ Claude
-  (รายละเอียดใน Addendum) ฟังก์ชัน pure `computeLegacyBonuses`/`mergeLegacyBonuses`/`applyLegacyBonuses`
-  พร้อมให้ server เรียกใช้แล้วเมื่อ flow ถูกออกแบบ
+  ทดสอบจริงกับ Postgres จริงผ่าน pglite แล้ว (ดู Addendum) — **ต่อเข้ากับ flow จริงแล้ว (Addendum 9)** ตามที่
+  ลีเลือก: Legacy ผูกกับผู้เล่นแต่ละคน ได้จากบทล่าสุดที่ตัวเองเล่นจบ ไม่ต้องเล่นกลุ่มเดิม
 - **ยังไม่ทำ**: เนื้อหาจริงของอีก 5 บท (ก่อนประวัติศาสตร์, ทวารวดี/รัฐแรกเริ่ม, สุโขทัย/อยุธยาตอนต้น,
   สมัยใหม่/สงครามโลก, ปัจจุบัน) — ต้องมีที่ปรึกษาประวัติศาสตร์ตามที่ ROADMAP.md ระบุ และการจัดวางบท 4 ที่ทำ
   ในรอบนี้เป็นแค่ข้อเสนอเริ่มต้น

@@ -5,6 +5,7 @@ import {
   ENDING_ORDER,
   ENDINGS,
   MAP,
+  NEW_CITY_NAMES,
   PERKS,
   POWERS,
   RESOURCES,
@@ -40,6 +41,7 @@ export const earlyRattanakosinChapter: ChapterDefinition = {
     yearsLabel: 'พ.ศ. 2367–2453 (โดยประมาณ)',
     summary:
       'สยามต้องรักษาเอกราชท่ามกลางแรงกดดันจากสองมหาอำนาจตะวันตก ด้วยการทูตแบบ "ไผ่ลู่ลม" — โน้มไปทางใดทางหนึ่งมากเกินไปเสี่ยงกลายเป็นรัฐใต้อาณัติ',
+    historianReviewed: false,
   },
   map: MAP,
   river: RIVER,
@@ -58,4 +60,20 @@ export const earlyRattanakosinChapter: ChapterDefinition = {
   endings: ENDINGS,
   endingOrder: ENDING_ORDER,
   seats: SEATS,
+  newCityNames: NEW_CITY_NAMES,
+  // exactly the text that used to be hard-coded in powers.ts/views.ts/Modals.tsx
+  flavor: {
+    ultimatum: {
+      icon: '⚓',
+      title: 'เรือปืนปิดปากแม่น้ำ',
+      text: 'ความอดทนของ{P}หมดลง เรือรบทอดสมออยู่หน้าเมืองและรอคำตอบก่อนพลบค่ำ',
+      arrivedLog: 'เรือปืนของ{P}ปิดปากแม่น้ำ',
+      paidChronicle: 'จ่ายค่าชดเชยเพื่อคลี่คลายวิกฤตเรือปืน',
+    },
+    intro: {
+      kicker: 'ต้นแบบบทไผ่ลู่ลม',
+      heading: 'ทุกสิ่งเริ่มจากการตัดสินใจครั้งแรกของคุณ',
+      body: 'คุณปกครอง{capital}ริมแม่น้ำ รอบข้างมีแคว้นอิสระสามแคว้น และมหาอำนาจทางทะเลสองฝ่ายที่ต่างอยากมีอิทธิพลเหนือราชสำนัก คุณมีเวลา{years}ปี',
+    },
+  },
 };

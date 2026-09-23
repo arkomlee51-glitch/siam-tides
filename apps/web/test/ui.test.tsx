@@ -1,10 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import { armiesOf, capitalOf } from '@siam/engine';
+import {
+  CHAPTERS,
+  applyAction,
+  armiesOf,
+  capitalOf,
+  createGame,
+  earlyRattanakosinChapter,
+  pairKey,
+} from '@siam/engine';
+import type { ChapterDefinition } from '@siam/engine';
 import { ME, useStore } from '../src/store';
 import { Hud } from '../src/ui/Hud';
 import { SidePanel } from '../src/ui/SidePanel';
 import { Modals } from '../src/ui/Modals';
+import { GoalsTab } from '../src/ui/GoalsTab';
+import { DiplomacyTab } from '../src/ui/DiplomacyTab';
 
 beforeEach(() => {
   useStore.getState().newGame(3);
@@ -64,5 +75,103 @@ describe('modals', () => {
     expect(screen.getByRole('button', { name: /ต่อรอง/ })).toBeDefined();
     act(() => screen.getByRole('button', { name: /ปฏิเสธ/ }).click());
     expect(useStore.getState().state.pending.some((p) => p.kind === 'offer')).toBe(false);
+  });
+});
+
+describe('chapter-driven UI (ADR-0007 Addendum 7)', () => {
+  it("shows names and labels from the game's own chapter, not data.ts", () => {
+    const chapter: ChapterDefinition = {
+      ...earlyRattanakosinChapter,
+      manifest: { ...earlyRattanakosinChapter.manifest, id: 'ui-test-chapter' },
+      buildings: {
+        ...earlyRattanakosinChapter.buildings,
+        granary: { ...earlyRattanakosinChapter.buildings['granary']!, name: 'ยุ้งทดสอบ' },
+      },
+      resourceLabels: { ...earlyRattanakosinChapter.resourceLabels, rice: { name: 'ข้าวทดสอบ', icon: '🍙' } },
+    };
+    CHAPTERS[chapter.manifest.id] = chapter;
+    try {
+      act(() => useStore.setState({ state: createGame({ chapter, humans: [{ id: ME }], seed: 3 }) }));
+      render(<Hud mode="light" onCycleTheme={() => {}} />);
+      render(<SidePanel />);
+      expect(screen.getByText('ข้าวทดสอบ')).toBeDefined();
+      const cap = capitalOf(useStore.getState().state, ME)!;
+      select(cap.c, cap.r);
+      expect(screen.getByText('ยุ้งทดสอบ')).toBeDefined();
+      expect(screen.queryByText('ยุ้งฉาง')).toBeNull();
+    } finally {
+      cleanup();
+      delete CHAPTERS[chapter.manifest.id];
+    }
+  });
+});
+
+describe('Legacy card (ADR-0007 Addendum 9)', () => {
+  it('shows the Legacy carried in from the previous chapter, and nothing when there is none', () => {
+    render(<GoalsTab />);
+    expect(screen.queryByText('มรดกจากบทก่อน')).toBeNull();
+    cleanup();
+
+    act(() =>
+      useStore.setState({
+        state: createGame({ humans: [{ id: ME, legacy: { military: 0.1, knowledge: 0.05 } }], seed: 3 }),
+      }),
+    );
+    render(<GoalsTab />);
+    expect(screen.getByText('มรดกจากบทก่อน')).toBeDefined();
+    expect(screen.getByText(/การทหาร.*\+10%/)).toBeDefined();
+    expect(screen.getByText(/ภูมิปัญญา.*\+5%/)).toBeDefined();
+  });
+});
+
+describe('human diplomacy (ADR-0008)', () => {
+  it('shows tribute/festival/union for another human, and the accept/decline for an incoming union offer', () => {
+    let s = createGame({
+      humans: [
+        { id: ME, name: 'เรา' },
+        { id: 'p2', name: 'เพื่อนบ้าน' },
+      ],
+      seed: 5,
+    });
+    s.relations[pairKey(ME, 'p2')]!.rel = 90;
+    s.factions.p2!.res.wealth = 999;
+    s.factions.p2!.res.faith = 999;
+    const r = applyAction(s, 'p2', { type: 'annex', target: ME });
+    if (!r.ok) throw new Error(r.error);
+    s = r.state;
+    act(() => useStore.setState({ state: s }));
+    render(<DiplomacyTab />);
+    expect(screen.getByRole('button', { name: /ส่งบรรณาการ.*อีกฝ่ายได้รับจริง/ })).toBeDefined();
+    expect(screen.getByRole('button', { name: /ยอมรับรวมแผ่นดิน/ })).toBeDefined();
+    expect(screen.getByText(/เพื่อนบ้านเสนอรวมแผ่นดินกับคุณ/)).toBeDefined();
+  });
+});
+
+describe('chapter picker (ADR-0009)', () => {
+  it('lists every chapter with a draft badge, and starting one uses that chapter everywhere', () => {
+    act(() => useStore.setState({ modals: [{ kind: 'newGame' }] }));
+    render(<Modals />);
+    expect(screen.getByText(/บทที่ 3: สุโขทัย–อยุธยาตอนต้น/)).toBeDefined();
+    expect(screen.getByText(/บทที่ 4: ต้นรัตนโกสินทร์/)).toBeDefined();
+    expect(screen.getAllByText('ร่าง').length).toBe(2);
+
+    act(() =>
+      screen
+        .getByText(/บทที่ 3: สุโขทัย–อยุธยาตอนต้น/)
+        .closest('button')!
+        .click(),
+    );
+    const s = useStore.getState().state;
+    expect(s.chapterId).toBe('sukhothai-ayutthaya');
+    expect(s.factions[ME]!.name).toBe('แคว้นสุโขทัย');
+    cleanup();
+
+    // the new game opens with this chapter's intro, naming its own capital — not the old chapter's
+    render(<Modals />);
+    expect(screen.getByText('แผ่นดินใหม่ใต้เงาอาณาจักรเก่า')).toBeDefined();
+    expect(screen.getByText(/คุณปกครองสุโขทัย/)).toBeDefined();
+    cleanup();
+    render(<Hud mode="light" onCycleTheme={() => {}} />);
+    expect(screen.getByText(/บทสุโขทัย–อยุธยาตอนต้น \(ร่าง\)/)).toBeDefined();
   });
 });

@@ -124,13 +124,15 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
 - [x] ตัวจับเวลาฤดู ตั้งได้ตอนสร้างห้องรอ (`seasonTimerSeconds`) หมดเวลาแล้ว request ถัดไป (GET/action/ws
       sync) จะบังคับ `endTurn` แทนคนที่ยังไม่พร้อมให้อัตโนมัติ ผ่าน `applyAction`/`game_actions` เดียวกับ
       คำสั่งปกติทุกประการ (replay ซ้ำได้) — ดู [ADR-0006](adr/0006-human-diplomacy-and-season-timer.md) และ
-      `apps/server/test/season-timer.test.ts` **ข้อจำกัด**: ค่านี้ยังไม่ถูกเขียนลง Supabase เกมจะกลับเป็น
-      "ไม่จำกัดเวลา" ถ้าเกิด cold-start replay
+      `apps/server/test/season-timer.test.ts` — ~~ข้อจำกัด: ยังไม่ถูกเขียนลง Supabase~~ ปิดแล้ว: เก็บใน
+      `games.season_timer_seconds` (migration `20260923000000_game_settings.sql`) cold-start replay จำค่าเดิม
+      และเริ่มนับฤดูปัจจุบันใหม่เต็มช่วง — ดู ADR-0007 Addendum 8
 - [x] การทูตระหว่างมนุษย์ — ข้อเสนอสงบศึกที่อีกฝ่ายต้องตอบรับเอง (`proposePeace`/`answerProposal` ใน engine,
       ไม่ใช่ `PendingDecision` เดิมที่ผูกกับอำนาจต่างชาติ — ดู ADR-0006) ทดสอบครบทั้งระดับ engine
       (`packages/engine/test/engine.test.ts`) และผ่าน HTTP จริงรวมความเป็นส่วนตัวของข้อเสนอ
-      (`apps/server/test/multiplayer.test.ts`) **ยังไม่ทำ**: `tribute`/`festival`/`annex` ยังใช้ได้แค่กับ AI
-      เท่านั้นเหมือนเดิม (ปรับความสัมพันธ์/ผนวกดินแดนกับมนุษย์ด้วยกันยังไม่มี flow)
+      (`apps/server/test/multiplayer.test.ts`) ~~`tribute`/`festival`/`annex` ใช้ได้แค่กับ AI~~
+      ปิดแล้ว: บรรณาการให้มนุษย์เป็นของขวัญจริง, งานบุญเหมือน AI, ผนวกมนุษย์เป็นข้อเสนอ "รวมแผ่นดิน" ที่อีกฝ่าย
+      ต้องยอมรับเอง (ตอนจบใหม่ `union`) — ดู [ADR-0008](adr/0008-human-tribute-festival-union.md)
 - [x] ยืนยันว่าตอนจบเกมหลายคนคำนวณถูกต้อง — แต่ละมนุษย์ได้ `ending` ของตัวเองอิสระจากกันอยู่แล้วในเอนจิน
       (`finishGame` ใน `packages/engine/src/endings.ts` วนทุก human faction) แค่ไม่เคยมีเทสต์ยืนยันมาก่อน
       ตอนนี้มีแล้วทั้ง engine และผ่าน HTTP จริง (`apps/server/test/multiplayer.test.ts`)
@@ -145,13 +147,13 @@ server เป็นผู้ตัดสิน client ส่งแค่คำ�
       instance จริง (ข้อต่อไปด้านล่าง) — ที่ทดสอบแล้วคือ contract ฝั่ง server (fresh connect/resync ต้องได้
       state ถูกต้องเสมอ) ซึ่งเป็นสิ่งที่ backoff-reconnect ฝั่ง client (`apps/web/src/api/socket.ts`) พึ่งพาอยู่
 - [~] Redis pub/sub ข้าม instance กับห้องรอ/เกมหลายคนจริง — เขียนเทสต์แล้ว (สร้างห้อง/join/start คนละ
-      instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
-      Redis/Docker ให้ใช้เลย (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` +
-      `docker compose up -d`) ควรรันจริงอย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่ — **นี่คือช่องว่างเดียวที่เหลือ
-      ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง) —
-      ลองทางเลือกอื่น (เขียน fake Redis server เองแบบพูด RESP protocol) แล้วแต่ตัดสินใจไม่ทำ เพราะจะพิสูจน์
-      แค่ว่าโค้ดปลอมทำงานถูก ไม่ได้พิสูจน์ atomicity ข้าม process จริงของ Redis ที่เทสต์นี้มีไว้ยืนยัน — ดู
-      [ADR-0006 Addendum 2](adr/0006-human-diplomacy-and-season-timer.md#addendum-2-รอบต่อมาในวันเดียวกัน-ทำไมไม่เขียน-fake-redis-server-เอง)
+  instance กัน, endTurn คนละ instance กับที่ฟัง WebSocket) แต่ยังไม่เคยรันจริงในสภาพแวดล้อมนี้เพราะไม่มี
+  Redis/Docker ให้ใช้เลย (`apps/server/test/redis-game.test.ts`, ต้อง `TEST_REDIS=1` +
+  `docker compose up -d`) ควรรันจริงอย่างน้อยหนึ่งครั้งก่อนไว้ใจเต็มที่ — **นี่คือช่องว่างเดียวที่เหลือ
+  ของเฟส 5 ที่ทำต่อในสภาพแวดล้อมนี้ไม่ได้เลย** (ไม่มี root/Docker/redis-server binary ให้ติดตั้ง) —
+  ลองทางเลือกอื่น (เขียน fake Redis server เองแบบพูด RESP protocol) แล้วแต่ตัดสินใจไม่ทำ เพราะจะพิสูจน์
+  แค่ว่าโค้ดปลอมทำงานถูก ไม่ได้พิสูจน์ atomicity ข้าม process จริงของ Redis ที่เทสต์นี้มีไว้ยืนยัน — ดู
+  [ADR-0006 Addendum 2](adr/0006-human-diplomacy-and-season-timer.md#addendum-2-รอบต่อมาในวันเดียวกัน-ทำไมไม่เขียน-fake-redis-server-เอง)
 
 **เสร็จเมื่อ** 4 คนเล่นจนจบได้โดยไม่ desync และ reconnect กลางเกมได้ — เหลือจุดเดียว: ยืนยัน pub/sub ข้าม
 instance จริงกับ Redis จริง (ลีต้องรันเองด้วย Docker) ส่วนที่เหลือทั้งหมด (ห้องรอ, ฤดูพร้อมกัน, ตัวจับเวลา,
@@ -174,18 +176,29 @@ instance จริงกับ Redis จริง (ลีต้องรัน�
       เดิมตรง ๆ (ไม่พิมพ์ซ้ำ) พิสูจน์ว่า schema รองรับเนื้อหาจริงที่ผ่านบาลานซ์มาแล้ว วางเป็นบท 4 จาก 6
       (ต้นรัตนโกสินทร์ รัชกาลที่ 3–5) — **การจัดวางเป็นข้อเสนอเริ่มต้นของ Claude เอง ยังไม่ผ่านที่ปรึกษา
       ประวัติศาสตร์**
-- [~] **rewire เอนจิน — เริ่มแล้วบางส่วน**: `createGame` (`state.ts`) รับ `chapter?: ChapterDefinition`
-      แล้ว อ่าน seats/ทรัพยากรเริ่มต้น/เสถียรภาพเริ่มต้น/กองรักษาเมืองหลวง/รายชื่อมหาอำนาจต่างชาติจาก chapter
-      จริง (ค่า default ยังพฤติกรรมเดิม 100% — ยืนยันด้วยเทสต์เทียบ state ตรง ๆ, 43 เทสต์ผ่านหมดรวมเทสต์ใหม่
-      5 เคส) **ยังไม่ทำ**: `economy`/`turn`/`ai`/`combat`/`powers`/`endings`/`actions`/`views`/`hex`/
-      `movement` (10 จาก 12 ไฟล์) ยัง import จาก `data.ts` ตรง ๆ — เล่นบทอื่นที่ต่างจาก `data.ts` จริง
-      ยังทำไม่ได้จนกว่าจะ rewire ต่อ (ตั้งใจแบ่งเป็นสไลซ์ย่อยแทนรีบทำรอบเดียว — ดู ADR-0007 Addendum 2)
+- [~] **rewire เอนจิน — gameplay logic ทุกไฟล์ + UI เว็บอ่านจาก chapter แล้ว, เหลือแผนที่กับฤดู/เหตุการณ์
+  ประจำฤดู (ตั้งใจเลื่อน)**: `createGame` อ่าน seats/ทรัพยากร/เสถียรภาพ/กองรักษาเมืองหลวง/มหาอำนาจจาก chapter
+  (ADR-0007 Addendum 2) — **ลีตัดสินใจแล้ว (Addendum 4): 6 บทใช้กลไกแกนกลางเดียวกัน แค่เปลี่ยนหน้าตา** →
+  ระบบ effect ทั่วไป: perk (Addendum 4), อาคาร/ภูมิประเทศ/ไผ่ลู่ลมหลายมหาอำนาจ (Addendum 5),
+  endings/actions/views/ai + `newCityNames` (Addendum 6), economy/combat/movement + effect
+  `cityDefenseMultiplier` แทน literal `'walls'` + UI เว็บผ่าน `chapterOf(state)` (Addendum 7 — ซึ่งแก้ข้อสรุป
+  ที่เกินจริงใน Addendum 6 ด้วย) — `GameState.chapterId` + registry ให้ทุกจุด lookup เนื้อหาบทได้ (engine 68,
+  server 63, web 30 เทสต์ผ่านหมด) — **ตั้งใจเลื่อน**: (1) `hex.ts` + map renderer ยังอ่านแผนที่จาก `data.ts`
+  (Addendum 6); (2) รายชื่อฤดู (`seasonOf`) กับโครงเหตุการณ์ประจำฤดูใน `turn.ts` (Addendum 5/7) — ทั้งสองข้อ
+  รอเนื้อหาบทจริงอีกอย่างน้อยหนึ่งบทก่อนออกแบบ
 - [x] **ที่เก็บ Legacy ใน Supabase** — migration `supabase/migrations/20260921000000_chapter_legacy.sql`
       (`games.chapter_id` + ตาราง `player_legacy`) ทดสอบจริงกับ Postgres จริงผ่าน `@electric-sql/pglite`
       (WASM, ไม่ต้องมี Docker) — DDL/constraint/RLS/upsert ผ่านหมด ดู [ADR-0007](adr/0007-chapter-content-schema-and-legacy.md)
-      Addendum **ยังไม่ทำ**: ต่อเข้ากับ flow จริง (จบเกม→เขียนแถว, เริ่มบทใหม่→อ่านมารวม) — เป็นการตัดสินใจ
-      เชิงเกมเพลย์ (กลุ่มผู้เล่นต้องเหมือนเดิมข้ามบทไหม ฯลฯ) ที่รอลีตัดสินใจ
-- [ ] **ยังไม่ทำ**: เนื้อหาจริงของอีก 5 บท (ก่อนประวัติศาสตร์ → ปัจจุบัน) — ต้องมีที่ปรึกษาประวัติศาสตร์
+      Addendum
+- [x] **ต่อ Legacy เข้ากับ flow จริง** — ลีเลือก: ผูกกับผู้เล่นแต่ละคน ได้จากบทล่าสุดที่ตัวเองเล่นจบ ไม่ต้อง
+      เล่นกลุ่มเดิม — จบเกม → เขียน `player_legacy`, เริ่มเกม → ใช้ Legacy กับเสถียรภาพ/ทัพ/ความสัมพันธ์/
+      ผลผลิต, `game_players.legacy` ให้ replay ได้เกมเดิมเป๊ะ, การ์ด "มรดกจากบทก่อน" ในแท็บเป้าหมาย — ดู
+      ADR-0007 Addendum 9
+- [~] **บทที่ 3 สุโขทัย–อยุธยาตอนต้น (ร่าง)** — `content/chapters/sukhothai-ayutthaya.ts` กลไกเหมือนเดิมทุกประการ
+  ต่างแค่ชื่อ/ข้อความ ใช้แผนที่เดิม เลือกบทได้จาก "เริ่มใหม่" และห้องรอ — **ยังไม่ผ่านที่ปรึกษาประวัติศาสตร์**
+  (ป้าย "ร่าง") ดู [ADR-0009](adr/0009-second-chapter-draft-sukhothai.md)
+- [ ] **ยังไม่ทำ**: เนื้อหาจริงของอีก 4 บท (ก่อนประวัติศาสตร์, ทวารวดี/รัฐแรกเริ่ม, สมัยใหม่, ปัจจุบัน) และการตรวจทั้ง
+      สองบทที่มีอยู่ — ต้องมีที่ปรึกษาประวัติศาสตร์
 - [ ] **ยังไม่ทำ**: Tech tree ต่อยุค, การ์ดขุนพล, Tactical View แบบ hex ย่อย
 - [ ] **ยังไม่ทำ**: Timeline Replay เทียบกับประวัติศาสตร์จริงพร้อมเกร็ดความรู้
 - [ ] **ยังไม่ทำ**: เครื่องมือปรับสมดุล — รัน simulation หลายพันเกมแล้วดูสัดส่วนตอนจบ
