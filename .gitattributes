@@ -1,0 +1,4 @@
+# ทุกไฟล์ข้อความเก็บและ checkout เป็น LF เสมอ ไม่ว่าจะแก้จาก Windows หรือ Linux
+# (เดิมไม่มีไฟล์นี้ — editor/git บน Windows เปลี่ยนไฟล์เป็น CRLF จน `git status` มีไฟล์ค้าง ~38 ไฟล์
+# ที่ต่างกันแค่ line ending) — git ตรวจไฟล์ binary เองจาก text=auto
+* text=auto eol=lf
