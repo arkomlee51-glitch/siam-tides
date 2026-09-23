@@ -6,6 +6,7 @@ import { ME, useStore } from '../src/store';
 import { Hud } from '../src/ui/Hud';
 import { SidePanel } from '../src/ui/SidePanel';
 import { Modals } from '../src/ui/Modals';
+import { GoalsTab } from '../src/ui/GoalsTab';
 
 beforeEach(() => {
   useStore.getState().newGame(3);
@@ -93,5 +94,23 @@ describe('chapter-driven UI (ADR-0007 Addendum 7)', () => {
       cleanup();
       delete CHAPTERS[chapter.manifest.id];
     }
+  });
+});
+
+describe('Legacy card (ADR-0007 Addendum 9)', () => {
+  it('shows the Legacy carried in from the previous chapter, and nothing when there is none', () => {
+    render(<GoalsTab />);
+    expect(screen.queryByText('มรดกจากบทก่อน')).toBeNull();
+    cleanup();
+
+    act(() =>
+      useStore.setState({
+        state: createGame({ humans: [{ id: ME, legacy: { military: 0.1, knowledge: 0.05 } }], seed: 3 }),
+      }),
+    );
+    render(<GoalsTab />);
+    expect(screen.getByText('มรดกจากบทก่อน')).toBeDefined();
+    expect(screen.getByText(/การทหาร.*\+10%/)).toBeDefined();
+    expect(screen.getByText(/ภูมิปัญญา.*\+5%/)).toBeDefined();
   });
 });

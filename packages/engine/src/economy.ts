@@ -63,6 +63,9 @@ export function computeIncome(s: GameState, f: Faction): Income {
   const S = seasonOf(s.turn);
   const inc = zero();
   for (const city of citiesOf(s, f.id)) addInto(inc, cityYield(city, chapter));
+  // Legacy from a previous chapter: an ongoing multiplier on this faction's city yields
+  const legacy = f.legacy?.yieldMultiplier;
+  if (legacy) for (const k of RESOURCE_IDS) inc[k] *= legacy[k] ?? 1;
   inc.rice *= S.rice * resourceMultiplier(f, 'rice', chapter);
   inc.man *= S.man;
   inc.know *= resourceMultiplier(f, 'know', chapter);

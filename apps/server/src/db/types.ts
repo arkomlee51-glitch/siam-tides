@@ -1,4 +1,4 @@
-import type { Action, GameState, SeatId } from '@siam/engine';
+import type { Action, GameState, LegacyBonus, LegacyCategory, SeatId } from '@siam/engine';
 
 export interface DbSeat {
   factionId: string;
@@ -7,6 +7,18 @@ export interface DbSeat {
   /** null = ที่นั่ง AI — ไม่มี Supabase user ผูกอยู่ */
   userId: string | null;
   ending: string | null;
+  /** Legacy รวมที่ที่นั่งนี้ได้ตอนเริ่มเกม — replay ใช้ค่านี้ (ไม่มี/null = ไม่มี Legacy) */
+  legacy?: Partial<Record<LegacyCategory, number>> | null;
+}
+
+/** 1 แถวของ player_legacy — Legacy ที่ผู้เล่นได้จากการจบบทหนึ่ง (บทเดิมเล่นซ้ำ = ทับแถวเดิม) */
+export interface LegacyRecord {
+  userId: string;
+  chapterId: string;
+  bonuses: LegacyBonus[];
+  sourceGameId: string | null;
+  /** ISO — ใช้ตัดสินว่าแถวไหนคือ "บทล่าสุดที่เล่นจบ" */
+  computedAt: string;
 }
 
 export interface DbGame {
@@ -74,5 +86,9 @@ export interface Db {
   loadForReplay(gameId: string): Promise<ReplayData | null>;
   /** best-effort — เรียกตอนเกมจบ (state.ended) ไม่ block response ถ้าล้มเหลว */
   markFinished(gameId: string, endingByFactionId: Record<string, string>): Promise<void>;
+  /** เขียน/ทับ Legacy ของผู้เล่นต่อบท (upsert ตาม user_id + chapter_id) */
+  upsertLegacy(records: Omit<LegacyRecord, 'computedAt'>[]): Promise<void>;
+  /** Legacy จากบทที่ผู้เล่นแต่ละคนเล่นจบล่าสุด (computedAt ใหม่สุด) — คนที่ไม่มีจะไม่อยู่ใน Map */
+  loadLatestLegacy(userIds: string[]): Promise<Map<string, LegacyRecord>>;
   close(): Promise<void>;
 }

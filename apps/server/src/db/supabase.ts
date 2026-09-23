@@ -1,7 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Action, GameState, SeatId } from '@siam/engine';
-import type { CreateGameInput, Db, DbActionEntry, DbGame, DbSeat, DbSnapshot, ReplayData } from './types.js';
+import type { Action, GameState, LegacyBonus, LegacyCategory, SeatId } from '@siam/engine';
+import type {
+  CreateGameInput,
+  Db,
+  DbActionEntry,
+  DbGame,
+  DbSeat,
+  DbSnapshot,
+  LegacyRecord,
+  ReplayData,
+} from './types.js';
 
 interface GameRow {
   id: string;
@@ -23,6 +32,15 @@ interface GamePlayerRow {
   seat: SeatId;
   name: string;
   ending: string | null;
+  legacy: Partial<Record<LegacyCategory, number>> | null;
+}
+
+interface PlayerLegacyRow {
+  user_id: string;
+  chapter_id: string;
+  bonuses: LegacyBonus[];
+  source_game_id: string | null;
+  computed_at: string;
 }
 
 interface GameSnapshotRow {
@@ -60,6 +78,7 @@ const toDbSeat = (row: GamePlayerRow): DbSeat => ({
   name: row.name,
   userId: row.user_id,
   ending: row.ending,
+  legacy: row.legacy ?? null,
 });
 
 const toDbSnapshot = (row: GameSnapshotRow): DbSnapshot => ({
@@ -112,6 +131,7 @@ export function createSupabaseDb(opts: SupabaseDbOptions): Db {
         seat: s.seat,
         name: s.name,
         ending: s.ending,
+        legacy: s.legacy ?? null,
       }));
       const { error: playersErr } = await client.from('game_players').insert(rows);
       if (playersErr) throw new Error(`บันทึกที่นั่งผู้เล่นลง Supabase ไม่สำเร็จ: ${playersErr.message}`);
@@ -193,6 +213,45 @@ export function createSupabaseDb(opts: SupabaseDbOptions): Db {
           .eq('game_id', gameId)
           .eq('faction_id', factionId);
       }
+    },
+
+    async upsertLegacy(records: Omit<LegacyRecord, 'computedAt'>[]) {
+      if (records.length === 0) return;
+      const now = new Date().toISOString();
+      const { error } = await client.from('player_legacy').upsert(
+        records.map((r): PlayerLegacyRow => ({
+          user_id: r.userId,
+          chapter_id: r.chapterId,
+          bonuses: r.bonuses,
+          source_game_id: r.sourceGameId,
+          computed_at: now,
+        })),
+        { onConflict: 'user_id,chapter_id' },
+      );
+      if (error) throw new Error(`บันทึก Legacy ลง Supabase ไม่สำเร็จ: ${error.message}`);
+    },
+
+    async loadLatestLegacy(userIds: string[]) {
+      const out = new Map<string, LegacyRecord>();
+      if (userIds.length === 0) return out;
+      const { data, error } = await client
+        .from('player_legacy')
+        .select('*')
+        .in('user_id', userIds)
+        .order('computed_at', { ascending: false });
+      if (error) throw new Error(`โหลด Legacy จาก Supabase ไม่สำเร็จ: ${error.message}`);
+      // เรียงใหม่สุดก่อน — แถวแรกที่เจอของผู้เล่นแต่ละคนคือบทล่าสุดที่เล่นจบ
+      for (const row of (data as PlayerLegacyRow[] | null) ?? []) {
+        if (out.has(row.user_id)) continue;
+        out.set(row.user_id, {
+          userId: row.user_id,
+          chapterId: row.chapter_id,
+          bonuses: row.bonuses,
+          sourceGameId: row.source_game_id,
+          computedAt: row.computed_at,
+        });
+      }
+      return out;
     },
 
     async close() {

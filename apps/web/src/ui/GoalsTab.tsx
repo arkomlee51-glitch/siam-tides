@@ -1,4 +1,4 @@
-import { endingProgress } from '@siam/engine';
+import { LEGACY_CATEGORIES, LEGACY_LABELS, endingProgress } from '@siam/engine';
 import type { EndingId } from '@siam/engine';
 import { ME, useStore } from '../store';
 import { chapterOf } from './format';
@@ -26,8 +26,31 @@ export function GoalsTab() {
     </div>
   );
 
+  const legacy = me.legacy
+    ? LEGACY_CATEGORIES.filter((c) => me.legacy!.totals[c] > 0).map((c) => ({
+        c,
+        pct: Math.round(me.legacy!.totals[c] * 1000) / 10,
+      }))
+    : [];
+
   return (
     <>
+      {legacy.length > 0 && (
+        <div className="card" aria-label="มรดกจากบทก่อน">
+          <div className="ch">
+            <span style={{ fontSize: 20 }}>🏛️</span>
+            <h3>มรดกจากบทก่อน</h3>
+          </div>
+          <ul className="goals">
+            {legacy.map(({ c, pct }) => (
+              <li className="ok" key={c}>
+                ✓ {LEGACY_LABELS[c]} +{pct}%
+              </li>
+            ))}
+          </ul>
+          <p className="muted small">ได้จากบทล่าสุดที่คุณเล่นจบ มีเพดานต่อหมวด ไม่สะสมเกินกว่านี้</p>
+        </div>
+      )}
       <p className="muted small">
         ตัดสินตอนจบเมื่อครบ {state.maxTurn} เทิร์น โดยตรวจจากบนลงล่าง เข้าเงื่อนไขข้อไหนก่อนได้ตอนจบนั้น
       </p>

@@ -10,6 +10,8 @@ import {
   armiesOf,
   buildingDefenseMultiplier,
   buildingStabilityBonus,
+  clampLegacyTotals,
+  pairKey,
   capitalOf,
   cityYield,
   combatMultiplier,
@@ -635,5 +637,85 @@ describe('combat/economy/movement read terrain, building and rule data from the 
       const totalStr = armiesOf(s, 'p1').reduce((sum, a) => sum + a.str, 0);
       expect(upkeepOf(s, 'p1')).toBe(totalStr);
     });
+  });
+});
+
+describe('Legacy applied at game start (ADR-0007 Addendum 9)', () => {
+  const base = () => createGame({ humans: [{ id: 'p1' }], seed: 42 });
+
+  it('no Legacy (or all-zero Legacy) gives exactly the same game as before', () => {
+    const plain = base();
+    const zero = createGame({ humans: [{ id: 'p1', legacy: {} }], seed: 42 });
+    const zeros = createGame({
+      humans: [{ id: 'p1', legacy: { infrastructure: 0, military: 0 } }],
+      seed: 42,
+    });
+    expect(zero).toEqual(plain);
+    expect(zeros).toEqual(plain);
+    expect(plain.factions.p1!.legacy).toBeUndefined();
+  });
+
+  it('applies stability, army strength, relations and the yield multiplier exactly as applyLegacyBonuses says', () => {
+    const legacy = { infrastructure: 0.15, culture: 0.15, military: 0.1, diplomacy: 0.1 };
+    const plain = base();
+    const withLegacy = createGame({ humans: [{ id: 'p1', legacy }], seed: 42 });
+    const adj = applyLegacyBonuses(clampLegacyTotals(legacy));
+    const f0 = plain.factions.p1!;
+    const f1 = withLegacy.factions.p1!;
+
+    expect(f1.stability).toBe(Math.min(100, f0.stability + adj.stabilityBonus));
+    expect(armiesOf(withLegacy, 'p1')[0]!.str).toBe(
+      Math.round(armiesOf(plain, 'p1')[0]!.str * adj.armyStrMultiplier),
+    );
+    for (const ai of Object.values(plain.factions).filter((x) => x.kind === 'ai')) {
+      const k = pairKey('p1', ai.id);
+      expect(withLegacy.relations[k]!.rel).toBe(Math.min(100, plain.relations[k]!.rel + adj.relationBonus));
+    }
+    expect(f1.legacy).toEqual({
+      totals: clampLegacyTotals(legacy),
+      yieldMultiplier: adj.cityYieldMultiplier,
+    });
+    // AI factions and everything else are untouched
+    expect(withLegacy.factions.north).toEqual(plain.factions.north);
+    expect(withLegacy.cities).toEqual(plain.cities);
+  });
+
+  it('clamps Legacy totals to the caps, so stored/tampered data cannot exceed them', () => {
+    expect(clampLegacyTotals({ military: 5, knowledge: -1, prosperity: Number.NaN, culture: 0.05 })).toEqual({
+      infrastructure: 0,
+      prosperity: 0,
+      culture: 0.05,
+      knowledge: 0,
+      military: LEGACY_CAPS.military,
+      diplomacy: 0,
+    });
+    const s = createGame({ humans: [{ id: 'p1', legacy: { military: 99 } }], seed: 42 });
+    expect(s.factions.p1!.legacy!.totals.military).toBe(LEGACY_CAPS.military);
+  });
+
+  it('computeIncome applies the Legacy yield multiplier every season, only to the resources it covers', () => {
+    const plain = base();
+    const withLegacy = createGame({ humans: [{ id: 'p1', legacy: { infrastructure: 0.15 } }], seed: 42 });
+    const a = computeIncome(plain, plain.factions.p1!);
+    const b = computeIncome(withLegacy, withLegacy.factions.p1!);
+    expect(b.rice).toBeGreaterThan(a.rice);
+    expect(b.wealth).toBe(a.wealth);
+    expect(b.know).toBe(a.know);
+    expect(b.upkeep).toBe(a.upkeep);
+  });
+
+  it('is deterministic: same seed and Legacy always build the same game', () => {
+    const legacy = { prosperity: 0.07, diplomacy: 0.04 };
+    expect(createGame({ humans: [{ id: 'p1', legacy }], seed: 9 })).toEqual(
+      createGame({ humans: [{ id: 'p1', legacy }], seed: 9 }),
+    );
+  });
+
+  it('Legacy notes name the chapter, not its raw id', () => {
+    const s = base();
+    s.factions.p1!.stats.wins = 3;
+    const notes = computeLegacyBonuses(s, 'early-rattanakosin', 'p1').map((b) => b.note);
+    expect(notes.length).toBeGreaterThan(0);
+    for (const n of notes) expect(n).toContain(earlyRattanakosinChapter.manifest.name);
   });
 });

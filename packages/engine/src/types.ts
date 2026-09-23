@@ -1,3 +1,5 @@
+import type { LegacyCategory } from './content/legacy.js';
+
 export type FactionId = string;
 export type TerrainId = 'C' | 'K' | 'L' | 'S' | 'M';
 export type SeasonId = 'rain' | 'cool' | 'hot';
@@ -69,6 +71,15 @@ export interface Faction {
   /** AI only: seasons until a new army is raised */
   recruitCd: number;
   ending: EndingId | null;
+  /** Legacy carried in from this player's previous chapter (docs/adr/0007 Addendum 9) — absent = none */
+  legacy?: FactionLegacy;
+}
+
+export interface FactionLegacy {
+  /** merged, capped totals per category (fractions, e.g. 0.08 = +8%) — what the UI shows */
+  totals: Record<LegacyCategory, number>;
+  /** ongoing multiplier on this faction's city yields, applied every season by `computeIncome` */
+  yieldMultiplier: Partial<Record<ResourceId, number>>;
 }
 
 export interface Relation {
